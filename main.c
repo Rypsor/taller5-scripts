@@ -5,8 +5,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
 /* USER CODE END Includes */
-
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 /* USER CODE END PTD */
@@ -43,6 +43,12 @@ volatile uint16_t g_countdown_ms_counter = 0;
 
 uint16_t g_encoder_value = 0;
 uint8_t Unidad_mil, Centenas, Decenas, Unidades;
+
+// --- Variables para los comandos UART ---
+#define UART_BUFFER_SIZE 50
+uint8_t g_uart_rx_buffer[UART_BUFFER_SIZE]; // Buffer para guardar el comando
+volatile uint8_t g_uart_rx_index = 0;       // Índice de la posición actual en el buffer
+uint8_t g_uart_rx_data;                     // Variable temporal para el byte que llega
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -206,6 +212,8 @@ int main(void)
    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
+   // --- Iniciar la recepción UART por Interrupción ---
+   HAL_UART_Receive_IT(&huart2, &g_uart_rx_data, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -715,6 +723,62 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2)
+  {
+    /* * Verificamos si el carácter recibido es "Enter" (Carriage Return).
+     * CoolTerm envía '\r' (0x0D) por defecto al presionar Enter.
+     */
+    if (g_uart_rx_data == '\r') // 0x0D es el "Carriage Return"
+    {
+      // --- Comando Recibido: Procesar el buffer ---
+
+      // 1. Añadimos el terminador nulo para convertir el buffer en un string de C
+      g_uart_rx_buffer[g_uart_rx_index] = '\0';
+
+      // 2. Comparamos el buffer con los comandos conocidos
+      if (strcmp((char*)g_uart_rx_buffer, "led rojo") == 0)
+      {
+        HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_SET);
+      }
+      else if (strcmp((char*)g_uart_rx_buffer, "led verde") == 0)
+      {
+        HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_SET);
+      }
+      else if (strcmp((char*)g_uart_rx_buffer, "led azul") == 0)
+      {
+        HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_SET);
+      }
+      else if (strcmp((char*)g_uart_rx_buffer, "apagar led") == 0)
+      {
+        HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_RESET);
+      }
+
+      // 3. Reiniciamos el índice del buffer para el próximo comando
+      g_uart_rx_index = 0;
+    }
+    else
+    {
+      // --- Carácter Normal: Añadir al buffer ---
+
+      // Si no es "Enter", guardamos el carácter en el buffer
+      if (g_uart_rx_index < (UART_BUFFER_SIZE - 1)) // Evitamos desbordamiento
+      {
+        g_uart_rx_buffer[g_uart_rx_index] = g_uart_rx_data;
+        g_uart_rx_index++;
+      }
+      // Si el buffer está lleno, simplemente ignoramos el carácter
+    }
+
+    // Volvemos a armar la interrupción para "escuchar" el próximo carácter
+    HAL_UART_Receive_IT(&huart2, &g_uart_rx_data, 1);
+  }
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     // Timer para el display (alta frecuencia)
