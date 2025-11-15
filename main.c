@@ -248,7 +248,7 @@ int main(void)
       }
 
       // --- Multiplexación del Display ---
-      HAL_GPIO_WritePin(UNIDADES_MIL_GPIO_Port, UNIDADES_MIL_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(MILES_GPIO_Port, MILES_Pin, GPIO_PIN_SET);
       HAL_GPIO_WritePin(CENTENAS_GPIO_Port, CENTENAS_Pin, GPIO_PIN_SET);
       HAL_GPIO_WritePin(DECENAS_GPIO_Port, DECENAS_Pin, GPIO_PIN_SET);
       HAL_GPIO_WritePin(UNIDADES_GPIO_Port, UNIDADES_Pin, GPIO_PIN_SET);
@@ -270,7 +270,7 @@ int main(void)
         break;
       case 3:
         lightNumber(Unidad_mil);
-        HAL_GPIO_WritePin(UNIDADES_MIL_GPIO_Port, UNIDADES_MIL_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(MILES_GPIO_Port, MILES_Pin, GPIO_PIN_RESET);
         break;
       }
       if (++current_digit > 3)
