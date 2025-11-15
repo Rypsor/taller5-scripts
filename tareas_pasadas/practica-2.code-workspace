@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../practica-2"
+		},
+		{
+			"name": "arduino",
+			"path": "../../PlatformIO/Projects/arduino"
+		}
+	],
+	"settings": {}
+}
