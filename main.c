@@ -582,11 +582,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENCODER_DT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : ENCODER_CLK_Pin ENCODER_SW_Pin */
-  GPIO_InitStruct.Pin = ENCODER_CLK_Pin|ENCODER_SW_Pin;
+  /*Configure GPIO pin : ENCODER_CLK_Pin */
+  GPIO_InitStruct.Pin = ENCODER_CLK_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(ENCODER_CLK_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : ENCODER_SW_Pin */
+  GPIO_InitStruct.Pin = ENCODER_SW_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_EVT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(ENCODER_SW_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -606,9 +612,6 @@ static void MX_GPIO_Init(void)
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
