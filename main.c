@@ -79,7 +79,7 @@ int main(void)
   MX_TIM5_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
-/* USER CODE BEGIN 2 */
+  /* USER CODE BEGIN 2 */
 
   // --- Iniciar Timers Tarea #1 (Blinky y Display) ---
   HAL_TIM_Base_Start_IT(&htim4); // Inicia TIM4 para el blinky (PC9)
@@ -97,9 +97,12 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  while (1)
+  {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+  }
   /* USER CODE END 3 */
 }
 
@@ -497,6 +500,13 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM4)
+  {
+    HAL_GPIO_TogglePin(BLINKY_GPIO_Port, BLINKY_Pin); // BLINKY_Pin is PC9
+  }
+}
 /* USER CODE END 4 */
 
 /**
