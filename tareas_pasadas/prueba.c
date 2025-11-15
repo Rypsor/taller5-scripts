@@ -32,7 +32,6 @@ TIM_HandleTypeDef htim5;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
 volatile uint8_t TIMER_DISPLAY_FLAG = 0;
 volatile uint8_t ENCODER_FLAG = 0;
 volatile uint8_t BUTTON_FLAG = 0;
@@ -71,7 +70,7 @@ void update_display_digits(uint16_t value)
 
 void lightNumber(uint8_t number)
 {
-    // Primero, apagar todos los segmentos (ánodo común)
+    // Primero, apagar todos los segmentos (poner a SET para ánodo común)
     HAL_GPIO_WritePin(SEGMENTO_A_GPIO_Port, SEGMENTO_A_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(SEGMENTO_B_GPIO_Port, SEGMENTO_B_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(SEGMENTO_C_GPIO_Port, SEGMENTO_C_Pin, GPIO_PIN_SET);
@@ -80,7 +79,7 @@ void lightNumber(uint8_t number)
     HAL_GPIO_WritePin(SEGMENTO_F_GPIO_Port, SEGMENTO_F_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(SEGMENTO_G_GPIO_Port, SEGMENTO_G_Pin, GPIO_PIN_SET);
 
-    // Encender los segmentos necesarios
+    // Encender los segmentos necesarios para cada número (poner a RESET)
     switch (number)
     {
     case 0:
@@ -187,33 +186,118 @@ int main(void)
   MX_TIM5_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
-  /* USER CODE BEGIN 2 */
+/* USER CODE BEGIN 2 */
+
   // --- Iniciar Timers Tarea #1 (Blinky y Display) ---
-   HAL_TIM_Base_Start_IT(&htim4); // Inicia TIM4 para el blinky (PC9)
-   HAL_TIM_Base_Start_IT(&htim3); // Inicia TIM3 para el refresco del display
+  HAL_TIM_Base_Start_IT(&htim4); // Inicia TIM4 para el blinky (PC9)
+  HAL_TIM_Base_Start_IT(&htim3); // Inicia TIM3 para el refresco del display
 
-   // --- Iniciar Timers Tarea #3 (PWM/DAC) ---
-   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // Inicia Pin A (PA5)
-   HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_1); // Inicia Pin B (PA0)
+  // --- Iniciar Timers Tarea #3 (PWM/DAC) ---
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // Inicia Pin A (PA5)
+  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_1); // Inicia Pin B (PA0)
 
-   // --- Configuración MCO (Tarea #3) ---
-   // Saca el PLLCLK (100MHz) dividido por 4 = 25MHz
-   HAL_RCC_MCOConfig(RCC_MCO1, RCC_MCO1SOURCE_PLLCLK, RCC_MCO_DIV4);
+  // --- Configuración MCO (Tarea #3) ---
+  // Saca el PLLCLK (100MHz) dividido por 4 = 25MHz
+  HAL_RCC_MCOConfig(RCC_MCO1, RCC_MCO1SOURCE_PLLCLK, RCC_MCO_DIV4);
 
-   update_display_digits(g_encoder_value);
-
-   // Habilitar interrupciones para el encoder SW (PB15)
-   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
-   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
-  /* USER CODE END 2 */
+  update_display_digits(g_encoder_value);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
     /* USER CODE END WHILE */
+    // --- 1. MANEJO DEL PULSADOR (Inicia la cuenta regresiva) ---
+    if (BUTTON_FLAG)
+    {
+      BUTTON_FLAG = 0;
+      if (g_system_state == STATE_NORMAL)
+      {
+        g_system_state = STATE_COUNTDOWN;
+        g_countdown_value = 10;
+        g_countdown_ms_counter = 0;
+        update_display_digits(g_countdown_value);
+      }
+    }
 
+    // --- 2. MANEJO DEL DISPLAY Y LÓGICA DE ESTADOS (Controlado por Timer) ---
+    if (TIMER_DISPLAY_FLAG)
+    {
+      TIMER_DISPLAY_FLAG = 0;
+
+      if (g_system_state == STATE_COUNTDOWN)
+      {
+        // TIM3 se dispara cada 5ms. 200 * 5ms = 1000ms = 1 segundo.
+        if (g_countdown_ms_counter >= 200)
+        {
+          g_countdown_ms_counter = 0;
+          g_countdown_value--;
+
+          if (g_countdown_value < 0)
+          {
+            g_system_state = STATE_NORMAL;
+            g_encoder_value = 0;
+            update_display_digits(g_encoder_value);
+          }
+          else
+          {
+            update_display_digits(g_countdown_value);
+          }
+        }
+      }
+
+      // --- Multiplexación del Display ---
+      HAL_GPIO_WritePin(MILES_GPIO_Port, MILES_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(CENTENAS_GPIO_Port, CENTENAS_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(DECENAS_GPIO_Port, DECENAS_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(UNIDADES_GPIO_Port, UNIDADES_Pin, GPIO_PIN_SET);
+
+      static uint8_t current_digit = 0;
+      switch (current_digit)
+      {
+      case 0:
+        lightNumber(Unidades);
+        HAL_GPIO_WritePin(UNIDADES_GPIO_Port, UNIDADES_Pin, GPIO_PIN_RESET);
+        break;
+      case 1:
+        lightNumber(Decenas);
+        HAL_GPIO_WritePin(DECENAS_GPIO_Port, DECENAS_Pin, GPIO_PIN_RESET);
+        break;
+      case 2:
+        lightNumber(Centenas);
+        HAL_GPIO_WritePin(CENTENAS_GPIO_Port, CENTENAS_Pin, GPIO_PIN_RESET);
+        break;
+      case 3:
+        lightNumber(Unidad_mil);
+        HAL_GPIO_WritePin(MILES_GPIO_Port, MILES_Pin, GPIO_PIN_RESET);
+        break;
+      }
+      if (++current_digit > 3)
+        current_digit = 0;
+    }
+
+    // --- 3. MANEJO DEL GIRO DEL ENCODER (Solo en modo normal) ---
+    if (ENCODER_FLAG && g_system_state == STATE_NORMAL)
+    {
+      ENCODER_FLAG = 0;
+      if (HAL_GPIO_ReadPin(ENCODER_DT_GPIO_Port, ENCODER_DT_Pin) == GPIO_PIN_RESET)
+      { // CCW
+        if (g_encoder_value == 0)
+          g_encoder_value = 4095;
+        else
+          g_encoder_value--;
+      }
+      else
+      { // CW
+        if (g_encoder_value == 4095)
+          g_encoder_value = 0;
+        else
+          g_encoder_value++;
+      }
+      update_display_digits(g_encoder_value);
+    }
     /* USER CODE BEGIN 3 */
     // --- 1. MANEJO DEL PULSADOR (Inicia la cuenta regresiva) ---
     if (BUTTON_FLAG)
@@ -628,14 +712,14 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, MILES_Pin|CENTENAS_Pin|DECENAS_Pin|BLINKY_Pin
-                          |SEGMENTO_E_Pin|SEGMENTO_C_Pin|SEGMENTO_D_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, MILES_Pin|CENTENAS_Pin|DECENAS_Pin|UNIDADES_Pin
+                          |BLINKY_Pin|SEGMENTO_E_Pin|SEGMENTO_C_Pin|SEGMENTO_D_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, LED_AZUL_Pin|LED_VERDE_Pin|SEGMENTO_F_Pin|SEGMENTO_B_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LED_ROJO_Pin|SEGMENTO_A_Pin|UNIDADES_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LED_ROJO_Pin|SEGMENTO_A_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SEGMENTO_G_GPIO_Port, SEGMENTO_G_Pin, GPIO_PIN_RESET);
@@ -654,17 +738,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : CENTENAS_Pin DECENAS_Pin BLINKY_Pin SEGMENTO_E_Pin
-                           SEGMENTO_C_Pin SEGMENTO_D_Pin */
-  GPIO_InitStruct.Pin = CENTENAS_Pin|DECENAS_Pin|BLINKY_Pin|SEGMENTO_E_Pin
-                          |SEGMENTO_C_Pin|SEGMENTO_D_Pin;
+  /*Configure GPIO pins : CENTENAS_Pin DECENAS_Pin UNIDADES_Pin BLINKY_Pin
+                           SEGMENTO_E_Pin SEGMENTO_C_Pin SEGMENTO_D_Pin */
+  GPIO_InitStruct.Pin = CENTENAS_Pin|DECENAS_Pin|UNIDADES_Pin|BLINKY_Pin
+                          |SEGMENTO_E_Pin|SEGMENTO_C_Pin|SEGMENTO_D_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LED_ROJO_Pin SEGMENTO_A_Pin UNIDADES_Pin */
-  GPIO_InitStruct.Pin = LED_ROJO_Pin|SEGMENTO_A_Pin|UNIDADES_Pin;
+  /*Configure GPIO pins : LED_ROJO_Pin SEGMENTO_A_Pin */
+  GPIO_InitStruct.Pin = LED_ROJO_Pin|SEGMENTO_A_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
@@ -676,17 +760,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENCODER_DT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : ENCODER_CLK_Pin */
-  GPIO_InitStruct.Pin = ENCODER_CLK_Pin;
+  /*Configure GPIO pins : ENCODER_CLK_Pin ENCODER_SW_Pin */
+  GPIO_InitStruct.Pin = ENCODER_CLK_Pin|ENCODER_SW_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(ENCODER_CLK_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : ENCODER_SW_Pin */
-  GPIO_InitStruct.Pin = ENCODER_SW_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(ENCODER_SW_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -702,13 +780,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(SEGMENTO_G_GPIO_Port, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
