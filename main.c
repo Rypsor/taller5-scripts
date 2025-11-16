@@ -1,3 +1,4 @@
+
 /* USER CODE BEGIN Header */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
@@ -57,6 +58,8 @@ uint8_t g_uart_rx_data;                     // Variable temporal para el byte qu
 // --- Banderas para solicitar lecturas ADC desde el bucle principal ---
 volatile uint8_t g_request_adc_vc = 0;
 volatile uint8_t g_request_adc_vb = 0;
+volatile uint8_t g_request_sweep_ic_vb = 0;
+volatile uint8_t g_request_adc_ic = 0; // Nueva bandera para leer Ic
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -71,6 +74,7 @@ static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 void lightNumber(uint8_t number);
 void update_display_digits(uint16_t value);
+static uint16_t leer_canal_adc(uint32_t channel);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -327,24 +331,178 @@ int main(void)
       update_display_digits(g_encoder_value);
     }
 
-    // --- 4. MANEJO DE SOLICITUDES ADC (No bloqueante) ---
-    if (g_request_adc_vc)
-    {
-        uint16_t adc_vc, adc_vb;
-        leer_canales_adc(&adc_vc, &adc_vb);
-        sprintf(g_tx_buffer, "%u\n", adc_vc);
-        HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
-        g_request_adc_vc = 0; // Bajar la bandera
-    }
+    // --- 4. MANEJO DE SOLICITUDES ADC (No bloqueante y robusto) ---
+	if (g_request_adc_vc)
+	{
+		uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_6);
+		uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+		char temp_buf[20];
 
-    if (g_request_adc_vb)
+		HAL_UART_Transmit(&huart2, (uint8_t*)"Vc: ", 4, 100);
+		sprintf(temp_buf, "%u", adc_val);
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)" (", 2, 100);
+
+		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		uint32_t volt_frac = voltage_mv % 1000;
+		if (volt_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		sprintf(temp_buf, "%u", (unsigned int)volt_frac);
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+		HAL_UART_Transmit(&huart2, (uint8_t*)" V)\n", 4, 100);
+		g_request_adc_vc = 0;
+	}
+
+	if (g_request_adc_vb)
+	{
+		uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_11);
+		uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+		char temp_buf[20];
+
+		HAL_UART_Transmit(&huart2, (uint8_t*)"Vb: ", 4, 100);
+		sprintf(temp_buf, "%u", adc_val);
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)" (", 2, 100);
+
+		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		uint32_t volt_frac = voltage_mv % 1000;
+		if (volt_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		sprintf(temp_buf, "%u", (unsigned int)volt_frac);
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+		HAL_UART_Transmit(&huart2, (uint8_t*)" V)\n", 4, 100);
+		g_request_adc_vb = 0;
+	}
+
+    if (g_request_sweep_ic_vb)
     {
-        uint16_t adc_vc, adc_vb;
-        leer_canales_adc(&adc_vc, &adc_vb);
-        sprintf(g_tx_buffer, "%u\n", adc_vb);
+        // Enviar cabecera de la tabla
+        sprintf(g_tx_buffer, "Vb(V),Ic(mA)\n");
         HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
-        g_request_adc_vb = 0; // Bajar la bandera
+
+        for (uint16_t pwm_val = 0; pwm_val <= 1023; pwm_val += 50)
+        {
+            // 1. Establecer el valor de PWM para Vb
+            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, pwm_val);
+
+            // 2. Pausa extendida para estabilizar el circuito (RC filters, OpAmps)
+            HAL_Delay(200);
+
+            // 3. Medir Vc y Vb reales
+            uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_6);
+            HAL_Delay(10); // Pequeña pausa para estabilizar el ADC al cambiar de canal
+            uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
+
+            // 4. Convertir lecturas ADC y PWM de Vc a milivoltios
+            uint16_t pwm_vc_val = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
+            uint32_t vc_pwm_mv = (uint32_t)pwm_vc_val * 3300 / 1023;
+            uint32_t vc_medido_mv = (uint32_t)adc_vc * 3300 / 4095;
+            uint32_t vb_mv = (uint32_t)adc_vb * 3300 / 4095;
+
+            // 5. Calcular Ic en microamperios (corregido)
+            uint32_t ic_ua = 0;
+			if (vc_pwm_mv > vc_medido_mv) {
+				ic_ua = (vc_pwm_mv - vc_medido_mv) * 1000 / 220;
+			}
+
+            // 6. Formatear y enviar la línea de datos manualmente para evitar problemas con sprintf
+            char temp_buf[10];
+
+            // --- Vb ---
+            sprintf(temp_buf, "%u", (unsigned int)(vb_mv / 1000));
+            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+            HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+
+            uint32_t vb_frac = vb_mv % 1000;
+            if (vb_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+            if (vb_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+            sprintf(temp_buf, "%u", (unsigned int)vb_frac);
+            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+            // --- Coma ---
+            HAL_UART_Transmit(&huart2, (uint8_t*)",", 1, 100);
+
+            // --- Ic ---
+            sprintf(temp_buf, "%u", (unsigned int)(ic_ua / 1000));
+            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+            HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+
+            uint32_t ic_frac = ic_ua % 1000;
+            if (ic_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+            if (ic_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+            sprintf(temp_buf, "%u", (unsigned int)ic_frac);
+            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+            // --- Salto de línea ---
+            HAL_UART_Transmit(&huart2, (uint8_t*)"\n", 1, 100);
+        }
+
+        g_request_sweep_ic_vb = 0; // Bajar la bandera al finalizar
     }
+      if (g_request_adc_ic)
+          {
+              // 1. Obtener el valor actual del PWM para Vc (PA5 -> TIM2_CH1)
+              uint16_t pwm_vc_val = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
+
+              // 2. Medir el voltaje real en el colector (Vc)
+              uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_6);
+
+              // 3. Convertir ambos a milivoltios
+              uint32_t vc_pwm_mv = (uint32_t)pwm_vc_val * 3300 / 1023; // Voltaje de alimentación del colector
+              uint32_t vc_medido_mv = (uint32_t)adc_vc * 3300 / 4095;    // Voltaje medido en el colector
+
+              // 4. Calcular Ic en microamperios para mantener la precisión
+              uint32_t ic_ua = 0;
+              if (vc_pwm_mv > vc_medido_mv) {
+                  ic_ua = (vc_pwm_mv - vc_medido_mv) * 1000 / 220;
+              }
+
+              // 5. Formatear y enviar
+              char temp_buf[20];
+              HAL_UART_Transmit(&huart2, (uint8_t*)"Ic: ", 4, 100);
+              sprintf(temp_buf, "%u", (unsigned int)(ic_ua / 1000));
+              HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+              HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+              uint32_t ic_frac = ic_ua % 1000;
+              if (ic_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+              if (ic_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+              sprintf(temp_buf, "%u", (unsigned int)ic_frac);
+              HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+              // Añadir voltajes de contexto
+              HAL_UART_Transmit(&huart2, (uint8_t*)" mA (Vsupply: ", 15, 100);
+              // Vsupply
+              sprintf(temp_buf, "%u", (unsigned int)(vc_pwm_mv / 1000));
+              HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+              HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+              uint32_t vs_frac = vc_pwm_mv % 1000;
+              if (vs_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+              if (vs_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+              sprintf(temp_buf, "%u", (unsigned int)vs_frac);
+              HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+              HAL_UART_Transmit(&huart2, (uint8_t*)"V, Vc: ", 7, 100);
+
+              // Vc
+              sprintf(temp_buf, "%u", (unsigned int)(vc_medido_mv / 1000));
+              HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+              HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+              uint32_t vc_frac = vc_medido_mv % 1000;
+              if (vc_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+              if (vc_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+              sprintf(temp_buf, "%u", (unsigned int)vc_frac);
+              HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+              HAL_UART_Transmit(&huart2, (uint8_t*)"V)\n", 3, 100);
+
+              g_request_adc_ic = 0; // Bajar la bandera
+          }
   }
   /* USER CODE END 3 */
 }
@@ -416,35 +574,16 @@ static void MX_ADC1_Init(void)
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = ENABLE;
+  hadc1.Init.ScanConvMode = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 2;
+  hadc1.Init.NbrOfConversion = 1;
   hadc1.Init.DMAContinuousRequests = DISABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-  */
-  sConfig.Channel = ADC_CHANNEL_6;
-  sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-  */
-  sConfig.Channel = ADC_CHANNEL_11;
-  sConfig.Rank = 2;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -767,21 +906,30 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-// --- Nueva función de ayuda para leer ambos canales del ADC ---
-static void leer_canales_adc(uint16_t* valor_vc, uint16_t* valor_vb)
+// --- Nueva función de ayuda para leer un solo canal del ADC ---
+static uint16_t leer_canal_adc(uint32_t channel)
 {
-    *valor_vc = 0; // Inicializar en caso de error
-    *valor_vb = 0; // Inicializar en caso de error
+    ADC_ChannelConfTypeDef sConfig = {0};
+    uint16_t adc_value = 0;
 
+    // 1. Configurar el canal específico que queremos leer
+    sConfig.Channel = channel;
+    sConfig.Rank = 1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES; // Aumentado para mayor estabilidad
+    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+    {
+        return 0; // Retornar 0 en caso de error de configuración
+    }
+
+    // 2. Iniciar, leer y detener la conversión
     HAL_ADC_Start(&hadc1);
     if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
     {
-        *valor_vc = HAL_ADC_GetValue(&hadc1); // Lectura de PA6
-        if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
-        {
-            *valor_vb = HAL_ADC_GetValue(&hadc1); // Lectura de PC1
-        }
+        adc_value = HAL_ADC_GetValue(&hadc1);
     }
+    // HAL_ADC_Stop(&hadc1); // Eliminado: en modo de conversión única (no continuo), se detiene solo.
+
+    return adc_value;
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -802,7 +950,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         if (strncmp((char*)g_uart_rx_buffer, "vb", 2) == 0)
         {
             uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
-            if (nuevo_valor > 999) nuevo_valor = 999;
+            if (nuevo_valor > 1023) nuevo_valor = 1023;
             __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, nuevo_valor);
             sprintf(g_tx_buffer, "Vb (PA0) ajustado a: %u\n", nuevo_valor);
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
@@ -810,7 +958,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         else if (strncmp((char*)g_uart_rx_buffer, "vc", 2) == 0)
         {
             uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
-            if (nuevo_valor > 999) nuevo_valor = 999;
+            if (nuevo_valor > 1023) nuevo_valor = 1023;
             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, nuevo_valor);
             sprintf(g_tx_buffer, "Vc (PA5) ajustado a: %u\n", nuevo_valor);
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
@@ -824,6 +972,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		else if (strcmp((char*)g_uart_rx_buffer, "leer_vb") == 0)
 		{
 			g_request_adc_vb = 1; // Activar la bandera para el bucle principal
+		}
+		else if (strcmp((char*)g_uart_rx_buffer, "barrido_ic_vb") == 0)
+		{
+			g_request_sweep_ic_vb = 1; // Activar la bandera para el bucle principal
+		}
+		else if (strcmp((char*)g_uart_rx_buffer, "leer_ic") == 0)
+		{
+			g_request_adc_ic = 1; // Activar la bandera para el bucle principal
 		}
 
         // --- TAREA 1: Comandos LED RGB ---
