@@ -336,13 +336,13 @@ int main(void)
 	{
 		uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_6);
 		uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+		uint32_t percentage_x10 = (voltage_mv * 10) / 33; // (voltage_mv / 3300) * 100.0
 		char temp_buf[20];
 
+		// Formato: Vc: X.XXXV (YY.Y%)
 		HAL_UART_Transmit(&huart2, (uint8_t*)"Vc: ", 4, 100);
-		sprintf(temp_buf, "%u", adc_val);
-		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-		HAL_UART_Transmit(&huart2, (uint8_t*)" (", 2, 100);
 
+		// --- Imprimir Voltaje ---
 		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
@@ -351,8 +351,16 @@ int main(void)
 		if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
 		sprintf(temp_buf, "%u", (unsigned int)volt_frac);
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)"V (", 3, 100);
 
-		HAL_UART_Transmit(&huart2, (uint8_t*)" V)\n", 4, 100);
+		// --- Imprimir Porcentaje ---
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 / 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 % 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+		HAL_UART_Transmit(&huart2, (uint8_t*)"%)\n", 3, 100);
 		g_request_adc_vc = 0;
 	}
 
@@ -360,13 +368,13 @@ int main(void)
 	{
 		uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_11);
 		uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+		uint32_t percentage_x10 = (voltage_mv * 10) / 33;
 		char temp_buf[20];
 
+		// Formato: Vb: X.XXXV (YY.Y%)
 		HAL_UART_Transmit(&huart2, (uint8_t*)"Vb: ", 4, 100);
-		sprintf(temp_buf, "%u", adc_val);
-		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-		HAL_UART_Transmit(&huart2, (uint8_t*)" (", 2, 100);
 
+		// --- Imprimir Voltaje ---
 		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
@@ -375,8 +383,16 @@ int main(void)
 		if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
 		sprintf(temp_buf, "%u", (unsigned int)volt_frac);
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)"V (", 3, 100);
 
-		HAL_UART_Transmit(&huart2, (uint8_t*)" V)\n", 4, 100);
+		// --- Imprimir Porcentaje ---
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 / 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 % 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+		HAL_UART_Transmit(&huart2, (uint8_t*)"%)\n", 3, 100);
 		g_request_adc_vb = 0;
 	}
 
@@ -949,18 +965,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         // --- TAREA 3: Comandos PWM (Formato vbXXX) ---
         if (strncmp((char*)g_uart_rx_buffer, "vb", 2) == 0)
         {
-            uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
-            if (nuevo_valor > 1023) nuevo_valor = 1023;
-            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, nuevo_valor);
-            sprintf(g_tx_buffer, "Vb (PA0) ajustado a: %u\n", nuevo_valor);
+            uint16_t porcentaje = atoi((char*)&g_uart_rx_buffer[2]);
+            if (porcentaje > 100) porcentaje = 100;
+			uint16_t pwm_val = ((uint32_t)porcentaje * 1023) / 100;
+            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, pwm_val);
+            sprintf(g_tx_buffer, "Vb (PA0) ajustado a: %u%% (PWM: %u)\n", porcentaje, pwm_val);
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
         }
         else if (strncmp((char*)g_uart_rx_buffer, "vc", 2) == 0)
         {
-            uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
-            if (nuevo_valor > 1023) nuevo_valor = 1023;
-            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, nuevo_valor);
-            sprintf(g_tx_buffer, "Vc (PA5) ajustado a: %u\n", nuevo_valor);
+            uint16_t porcentaje = atoi((char*)&g_uart_rx_buffer[2]);
+            if (porcentaje > 100) porcentaje = 100;
+            uint16_t pwm_val = ((uint32_t)porcentaje * 1023) / 100;
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pwm_val);
+            sprintf(g_tx_buffer, "Vc (PA5) ajustado a: %u%% (PWM: %u)\n", porcentaje, pwm_val);
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
         }
 
