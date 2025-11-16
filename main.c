@@ -926,7 +926,9 @@ static void MX_GPIO_Init(void)
 static uint16_t leer_canal_adc(uint32_t channel)
 {
     ADC_ChannelConfTypeDef sConfig = {0};
-    uint16_t adc_value = 0;
+    uint32_t adc_sum = 0;
+	uint16_t adc_value = 0;
+	const int num_samples = 16;
 
     // 1. Configurar el canal específico que queremos leer
     sConfig.Channel = channel;
@@ -937,13 +939,18 @@ static uint16_t leer_canal_adc(uint32_t channel)
         return 0; // Retornar 0 en caso de error de configuración
     }
 
-    // 2. Iniciar, leer y detener la conversión
-    HAL_ADC_Start(&hadc1);
-    if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
-    {
-        adc_value = HAL_ADC_GetValue(&hadc1);
-    }
-    // HAL_ADC_Stop(&hadc1); // Eliminado: en modo de conversión única (no continuo), se detiene solo.
+    // 2. Bucle de sobremuestreo y promediado
+	for (int i = 0; i < num_samples; i++)
+	{
+		HAL_ADC_Start(&hadc1);
+		if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
+		{
+			adc_sum += HAL_ADC_GetValue(&hadc1);
+		}
+	}
+
+    // 3. Calcular el promedio
+    adc_value = adc_sum / num_samples;
 
     return adc_value;
 }
