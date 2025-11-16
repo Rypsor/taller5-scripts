@@ -53,6 +53,10 @@ uint8_t Unidad_mil, Centenas, Decenas, Unidades;
 uint8_t g_uart_rx_buffer[UART_BUFFER_SIZE]; // Buffer para guardar el comando
 volatile uint8_t g_uart_rx_index = 0;       // Índice de la posición actual en el buffer
 uint8_t g_uart_rx_data;                     // Variable temporal para el byte que llega
+
+// --- Banderas para solicitar lecturas ADC desde el bucle principal ---
+volatile uint8_t g_request_adc_vc = 0;
+volatile uint8_t g_request_adc_vb = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -321,6 +325,25 @@ int main(void)
           g_encoder_value++;
       }
       update_display_digits(g_encoder_value);
+    }
+
+    // --- 4. MANEJO DE SOLICITUDES ADC (No bloqueante) ---
+    if (g_request_adc_vc)
+    {
+        uint16_t adc_vc, adc_vb;
+        leer_canales_adc(&adc_vc, &adc_vb);
+        sprintf(g_tx_buffer, "%u\n", adc_vc);
+        HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+        g_request_adc_vc = 0; // Bajar la bandera
+    }
+
+    if (g_request_adc_vb)
+    {
+        uint16_t adc_vc, adc_vb;
+        leer_canales_adc(&adc_vc, &adc_vb);
+        sprintf(g_tx_buffer, "%u\n", adc_vb);
+        HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+        g_request_adc_vb = 0; // Bajar la bandera
     }
   }
   /* USER CODE END 3 */
@@ -793,20 +816,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
         }
 
-		// --- TAREA 3: Comandos para leer Vc y Vb (Refactorizado) ---
+		// --- TAREA 3: Comandos para leer Vc y Vb (No bloqueante) ---
 		else if (strcmp((char*)g_uart_rx_buffer, "leer_vc") == 0)
 		{
-			uint16_t adc_vc, adc_vb;
-			leer_canales_adc(&adc_vc, &adc_vb);
-			sprintf(g_tx_buffer, "%u\n", adc_vc);
-			HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+			g_request_adc_vc = 1; // Activar la bandera para el bucle principal
 		}
 		else if (strcmp((char*)g_uart_rx_buffer, "leer_vb") == 0)
 		{
-			uint16_t adc_vc, adc_vb;
-			leer_canales_adc(&adc_vc, &adc_vb);
-			sprintf(g_tx_buffer, "%u\n", adc_vb);
-			HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+			g_request_adc_vb = 1; // Activar la bandera para el bucle principal
 		}
 
         // --- TAREA 1: Comandos LED RGB ---
