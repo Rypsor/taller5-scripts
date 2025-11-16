@@ -5,8 +5,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <string.h>
+#include <string.h> // Para strcmp y strncmp
+#include <stdio.h>  // Para sscanf (leer números de un string)
+#include <stdlib.h> // Para sscanf
 /* USER CODE END Includes */
+
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 /* USER CODE END PTD */
@@ -40,6 +43,7 @@ volatile uint8_t BUTTON_FLAG = 0;
 volatile uint8_t g_system_state = STATE_NORMAL;
 volatile int8_t g_countdown_value = 10;
 volatile uint16_t g_countdown_ms_counter = 0;
+char g_tx_buffer[100];
 
 uint16_t g_encoder_value = 0;
 uint8_t Unidad_mil, Centenas, Decenas, Unidades;
@@ -194,6 +198,12 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
+  // Iniciar los PWMs de la Tarea 3
+  // PA5 (Vc) usa TIM2, Canal 1
+  // PA0 (Vb) usa TIM5, Canal 1
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_1);
+
   // --- Iniciar Timers Tarea #1 (Blinky y Display) ---
    HAL_TIM_Base_Start_IT(&htim4); // Inicia TIM4 para el blinky (PC9)
    HAL_TIM_Base_Start_IT(&htim3); // Inicia TIM3 para el refresco del display
@@ -383,13 +393,13 @@ static void MX_ADC1_Init(void)
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
+  hadc1.Init.ScanConvMode = ENABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.NbrOfConversion = 2;
   hadc1.Init.DMAContinuousRequests = DISABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
@@ -402,6 +412,15 @@ static void MX_ADC1_Init(void)
   sConfig.Channel = ADC_CHANNEL_6;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_11;
+  sConfig.Rank = 2;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -722,62 +741,116 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_2 */
 }
 
+
 /* USER CODE BEGIN 4 */
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART2)
   {
-    /* * Verificamos si el carácter recibido es "Enter" (Carriage Return).
-     * CoolTerm envía '\r' (0x0D) por defecto al presionar Enter.
-     */
-    if (g_uart_rx_data == '\r') // 0x0D es el "Carriage Return"
+    // Verificamos si el carácter recibido es un terminador de línea
+    if (g_uart_rx_data == '\r' || g_uart_rx_data == '\n')
     {
-      // --- Comando Recibido: Procesar el buffer ---
+      // --- Comando Recibido: Procesar ---
+      if (g_uart_rx_index > 0)
+      {
+        // 1. Añadimos el terminador nulo para convertir el búfer en un string de C
+        g_uart_rx_buffer[g_uart_rx_index] = '\0';
 
-      // 1. Añadimos el terminador nulo para convertir el buffer en un string de C
-      g_uart_rx_buffer[g_uart_rx_index] = '\0';
 
-      // 2. Comparamos el buffer con los comandos conocidos
-      if (strcmp((char*)g_uart_rx_buffer, "led rojo") == 0)
-      {
-        HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_SET);
-      }
-      else if (strcmp((char*)g_uart_rx_buffer, "led verde") == 0)
-      {
-        HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_SET);
-      }
-      else if (strcmp((char*)g_uart_rx_buffer, "led azul") == 0)
-      {
-        HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_SET);
-      }
-      else if (strcmp((char*)g_uart_rx_buffer, "apagar led") == 0)
-      {
-        HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_RESET);
-      }
+        // --- TAREA 3: Comandos PWM (Formato vbXXX) ---
+        if (strncmp((char*)g_uart_rx_buffer, "vb", 2) == 0)
+        {
+            uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
+            if (nuevo_valor > 999) nuevo_valor = 999;
+            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, nuevo_valor);
+            sprintf(g_tx_buffer, "Vb (PA0) ajustado a: %u\n", nuevo_valor);
+            HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+        }
+        else if (strncmp((char*)g_uart_rx_buffer, "vc", 2) == 0)
+        {
+            uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
+            if (nuevo_valor > 999) nuevo_valor = 999;
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, nuevo_valor);
+            sprintf(g_tx_buffer, "Vc (PA5) ajustado a: %u\n", nuevo_valor);
+            HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+        }
 
-      // 3. Reiniciamos el índice del buffer para el próximo comando
-      g_uart_rx_index = 0;
-    }
-    else
-    {
+        // --- ¡NUEVO! TAREA 3: Leer ADC (PA6/Ve) ---
+        else if (strcmp((char*)g_uart_rx_buffer, "read") == 0)
+        {
+            uint16_t adc_valor_ve;
+
+            // Iniciar conversión ADC
+            HAL_ADC_Start(&hadc1);
+
+            // Esperar a que la conversión termine (puedes ajustar el timeout)
+            if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
+            {
+                // Leer el valor
+                adc_valor_ve = HAL_ADC_GetValue(&hadc1);
+            }
+            else
+            {
+                adc_valor_ve = 0; // Marcar error
+            }
+
+            // Detener el ADC
+            HAL_ADC_Stop(&hadc1);
+
+            // Enviar el valor por UART
+            sprintf(g_tx_buffer, "Valor ADC (Ve en PA6): %u\n", adc_valor_ve);
+            HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+        }
+
+        // --- TAREA 1: Comandos LED RGB ---
+        else if (strcmp((char*)g_uart_rx_buffer, "rojo") == 0)
+        {
+        	HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_SET);
+        }
+        else if (strcmp((char*)g_uart_rx_buffer, "verde") == 0)
+        {
+        	HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_RESET);
+        	HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_SET);
+        }
+        else if (strcmp((char*)g_uart_rx_buffer, "azul") == 0)
+        {
+        	HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_RESET);
+        	HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_SET);
+        }
+        else if (strcmp((char*)g_uart_rx_buffer, "apagar") == 0)
+        {
+          HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_RESET);
+          HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_RESET);
+          HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_RESET);
+        }
+		else
+		{
+			HAL_UART_Transmit(&huart2, (uint8_t*)"Comando no valido\n", 18, 100);
+		}
+
+		// 3. Reiniciamos el índice del buffer para el próximo comando
+		g_uart_rx_index = 0;
+	  }
+	}
+	else
+	{
       // --- Carácter Normal: Añadir al buffer ---
+	  if (g_uart_rx_index < (UART_BUFFER_SIZE - 1))
+	  {
+		g_uart_rx_buffer[g_uart_rx_index++] = g_uart_rx_data;
+	  }
+	}
 
-      // Si no es "Enter", guardamos el carácter en el buffer
-      if (g_uart_rx_index < (UART_BUFFER_SIZE - 1)) // Evitamos desbordamiento
-      {
-        g_uart_rx_buffer[g_uart_rx_index] = g_uart_rx_data;
-        g_uart_rx_index++;
-      }
-      // Si el buffer está lleno, simplemente ignoramos el carácter
-    }
-
-    // Volvemos a armar la interrupción para "escuchar" el próximo carácter
-    HAL_UART_Receive_IT(&huart2, &g_uart_rx_data, 1);
+	// Volvemos a armar la interrupción para "escuchar" el próximo carácter
+	HAL_UART_Receive_IT(&huart2, &g_uart_rx_data, 1);
   }
 }
+
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
@@ -815,7 +888,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             last_button_press_time = HAL_GetTick();
         }
     }
+
 }
+
 /* USER CODE END 4 */
 
 /**
