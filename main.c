@@ -744,6 +744,23 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// --- Nueva función de ayuda para leer ambos canales del ADC ---
+static void leer_canales_adc(uint16_t* valor_vc, uint16_t* valor_vb)
+{
+    *valor_vc = 0; // Inicializar en caso de error
+    *valor_vb = 0; // Inicializar en caso de error
+
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
+    {
+        *valor_vc = HAL_ADC_GetValue(&hadc1); // Lectura de PA6
+        if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
+        {
+            *valor_vb = HAL_ADC_GetValue(&hadc1); // Lectura de PC1
+        }
+    }
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART2)
@@ -776,63 +793,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
         }
 
-        // --- TAREA 3: Comandos para leer Vc y Vb ---
-        else if (strcmp((char*)g_uart_rx_buffer, "leer_vc") == 0)
+		// --- TAREA 3: Comandos para leer Vc y Vb (Refactorizado) ---
+		else if (strcmp((char*)g_uart_rx_buffer, "leer_vc") == 0)
 		{
-			uint16_t adc_valor;
-
-			// Iniciar la secuencia de conversión (ambos canales)
-			HAL_ADC_Start(&hadc1);
-
-			// Esperar la conversión del Canal 1 (PA6 -> Vc)
-			if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
-			{
-				adc_valor = HAL_ADC_GetValue(&hadc1);
-
-				// Hay que esperar también la segunda conversión para que el ADC complete el ciclo
-				HAL_ADC_PollForConversion(&hadc1, 100);
-			}
-			else
-			{
-				adc_valor = 0; // Error
-			}
-			// Detener el ADC
-			HAL_ADC_Stop(&hadc1);
-
-			// Enviar solo el número
-			sprintf(g_tx_buffer, "%u\n", adc_valor);
+			uint16_t adc_vc, adc_vb;
+			leer_canales_adc(&adc_vc, &adc_vb);
+			sprintf(g_tx_buffer, "%u\n", adc_vc);
 			HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
 		}
 		else if (strcmp((char*)g_uart_rx_buffer, "leer_vb") == 0)
 		{
-			uint16_t adc_valor;
-
-			// Iniciar la secuencia de conversión
-			HAL_ADC_Start(&hadc1);
-
-			// Esperar y descartar la primera conversión (PA6)
-			if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
-			{
-				// Esperar la conversión del Canal 2 (PC1 -> Vb)
-				if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
-				{
-					adc_valor = HAL_ADC_GetValue(&hadc1);
-				}
-				else
-				{
-					adc_valor = 0; // Error
-				}
-			}
-			else
-			{
-				adc_valor = 0; // Error
-			}
-
-			// Detener el ADC
-			HAL_ADC_Stop(&hadc1);
-
-			// Enviar solo el número
-			sprintf(g_tx_buffer, "%u\n", adc_valor);
+			uint16_t adc_vc, adc_vb;
+			leer_canales_adc(&adc_vc, &adc_vb);
+			sprintf(g_tx_buffer, "%u\n", adc_vb);
 			HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
 		}
 
