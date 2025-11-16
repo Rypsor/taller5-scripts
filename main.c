@@ -6,6 +6,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
@@ -383,8 +385,8 @@ static void MX_ADC1_Init(void)
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.ScanConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
@@ -723,34 +725,132 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/**
+ * @brief Cambia dinámicamente el canal del ADC1 que se va a leer.
+ * @param channel El canal a seleccionar (ej. ADC_CHANNEL_6).
+ */
+void ADC_Select_Channel(uint32_t channel)
+{
+    ADC_ChannelConfTypeDef sConfig = {0};
+    sConfig.Channel = channel;
+    sConfig.Rank = 1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES; // Mayor tiempo de muestreo para estabilidad
+    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+    {
+        Error_Handler();
+    }
+}
 
+/**
+ * @brief Callback que se ejecuta cuando se recibe un dato por UART.
+ *        Acumula los caracteres en un buffer hasta recibir un 'Enter' ('\r' o '\n'),
+ *        momento en el que procesa el comando completo.
+ */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART2)
   {
-    /* * Verificamos si el carácter recibido es "Enter" (Carriage Return).
-     * CoolTerm envía '\r' (0x0D) por defecto al presionar Enter.
-     */
-    if (g_uart_rx_data == '\r') // 0x0D es el "Carriage Return"
+    if (g_uart_rx_data == '\r' || g_uart_rx_data == '\n')
     {
-      // --- Comando Recibido: Procesar el buffer ---
-
-      // 1. Añadimos el terminador nulo para convertir el buffer en un string de C
       g_uart_rx_buffer[g_uart_rx_index] = '\0';
 
-      // 2. Comparamos el buffer con los comandos conocidos
-      if (strcmp((char*)g_uart_rx_buffer, "led rojo") == 0)
+      char cmd[20];
+      int value;
+      uint32_t adc_value;
+      char tx_buffer[64];
+
+      // --- 1. COMANDOS DE CONTROL (set_vc, set_vb) ---
+      if (sscanf((char*)g_uart_rx_buffer, "set_vc %d", &value) == 1)
       {
-        HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_SET);
+        if (value >= 0 && value <= 1023) {
+          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, value); // PA5
+        }
       }
-      else if (strcmp((char*)g_uart_rx_buffer, "led verde") == 0)
+      else if (sscanf((char*)g_uart_rx_buffer, "set_vb %d", &value) == 1)
       {
-        HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_SET);
+        if (value >= 0 && value <= 1023) {
+          __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, value); // PA0
+        }
       }
-      else if (strcmp((char*)g_uart_rx_buffer, "led azul") == 0)
+
+      // --- 2. COMANDOS DE LECTURA (get_ve, get_vb) ---
+      else if (strcmp((char*)g_uart_rx_buffer, "get_ve") == 0)
       {
-        HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_SET);
+        ADC_Select_Channel(ADC_CHANNEL_6); // PA6
+        HAL_ADC_Start(&hadc1);
+        HAL_ADC_PollForConversion(&hadc1, 100);
+        adc_value = HAL_ADC_GetValue(&hadc1);
+        HAL_ADC_Stop(&hadc1);
+
+        sprintf(tx_buffer, "Ve (ADC): %lu\r\n", adc_value);
+        HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, strlen(tx_buffer), 100);
       }
+      else if (strcmp((char*)g_uart_rx_buffer, "get_vb") == 0)
+      {
+        ADC_Select_Channel(ADC_CHANNEL_11); // PC1
+        HAL_ADC_Start(&hadc1);
+        HAL_ADC_PollForConversion(&hadc1, 100);
+        adc_value = HAL_ADC_GetValue(&hadc1);
+        HAL_ADC_Stop(&hadc1);
+
+        sprintf(tx_buffer, "Vb (ADC): %lu\r\n", adc_value);
+        HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, strlen(tx_buffer), 100);
+      }
+
+      // --- 3. ANÁLISIS Ic vs Vb ---
+      else if (strcmp((char*)g_uart_rx_buffer, "analisis_ic_vb") == 0)
+      {
+        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 512); // Vc constante al 50%
+        HAL_Delay(100);
+
+        for (int duty_vb = 0; duty_vb < 1024; duty_vb++)
+        {
+          __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, duty_vb);
+          HAL_Delay(10);
+
+          ADC_Select_Channel(ADC_CHANNEL_11); // Vb
+          HAL_ADC_Start(&hadc1);
+          HAL_ADC_PollForConversion(&hadc1, 100);
+          uint32_t vb_adc = HAL_ADC_GetValue(&hadc1);
+          HAL_ADC_Stop(&hadc1);
+
+          ADC_Select_Channel(ADC_CHANNEL_6);  // Ve
+          HAL_ADC_Start(&hadc1);
+          HAL_ADC_PollForConversion(&hadc1, 100);
+          uint32_t ve_adc = HAL_ADC_GetValue(&hadc1);
+          HAL_ADC_Stop(&hadc1);
+
+          sprintf(tx_buffer, "%lu,%lu\r\n", vb_adc, ve_adc);
+          HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, strlen(tx_buffer), 100);
+        }
+      }
+
+      // --- 4. ANÁLISIS Ic vs Vc ---
+      else if (strcmp((char*)g_uart_rx_buffer, "analisis_ic_vc") == 0)
+      {
+        __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, 400); // Vb constante
+        HAL_Delay(100);
+
+        for (int duty_vc = 0; duty_vc < 1024; duty_vc++)
+        {
+          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, duty_vc);
+          HAL_Delay(10);
+
+          ADC_Select_Channel(ADC_CHANNEL_6); // Ve
+          HAL_ADC_Start(&hadc1);
+          HAL_ADC_PollForConversion(&hadc1, 100);
+          uint32_t ve_adc = HAL_ADC_GetValue(&hadc1);
+          HAL_ADC_Stop(&hadc1);
+
+          sprintf(tx_buffer, "%d,%lu\r\n", duty_vc, ve_adc);
+          HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, strlen(tx_buffer), 100);
+        }
+      }
+
+      // --- Comandos de Tareas Anteriores ---
+      else if (strcmp((char*)g_uart_rx_buffer, "led rojo") == 0) { HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_SET); }
+      else if (strcmp((char*)g_uart_rx_buffer, "led verde") == 0) { HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_SET); }
+      else if (strcmp((char*)g_uart_rx_buffer, "led azul") == 0) { HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_SET); }
       else if (strcmp((char*)g_uart_rx_buffer, "apagar led") == 0)
       {
         HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_RESET);
@@ -758,23 +858,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         HAL_GPIO_WritePin(LED_AZUL_GPIO_Port, LED_AZUL_Pin, GPIO_PIN_RESET);
       }
 
-      // 3. Reiniciamos el índice del buffer para el próximo comando
       g_uart_rx_index = 0;
     }
     else
     {
-      // --- Carácter Normal: Añadir al buffer ---
-
-      // Si no es "Enter", guardamos el carácter en el buffer
-      if (g_uart_rx_index < (UART_BUFFER_SIZE - 1)) // Evitamos desbordamiento
+      if (g_uart_rx_index < (UART_BUFFER_SIZE - 1))
       {
-        g_uart_rx_buffer[g_uart_rx_index] = g_uart_rx_data;
-        g_uart_rx_index++;
+        g_uart_rx_buffer[g_uart_rx_index++] = g_uart_rx_data;
       }
-      // Si el buffer está lleno, simplemente ignoramos el carácter
     }
-
-    // Volvemos a armar la interrupción para "escuchar" el próximo carácter
     HAL_UART_Receive_IT(&huart2, &g_uart_rx_data, 1);
   }
 }
