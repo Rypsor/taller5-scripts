@@ -458,7 +458,7 @@ int main(void)
 
             // 1. Establecer el valor de PWM para Vb
             __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, pwm_val);
-            HAL_Delay(200); // Pausa para estabilizar
+            HAL_Delay(20); // Pausa para estabilizar
 
             // 2. Medir Vc, Vb y Vsupply
             uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_14);
@@ -515,7 +515,7 @@ int main(void)
 
 			// 1. Establecer el valor de PWM para Vc
 			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pwm_val);
-			HAL_Delay(200); // Pausa para estabilizar
+			HAL_Delay(20); // Pausa para estabilizar
 
 			// 2. Medir Vc, Vb y Vsupply
 			uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_14);
@@ -580,12 +580,7 @@ int main(void)
 
 			  // 4. Formatear y enviar
 			  HAL_UART_Transmit(&huart2, (uint8_t*)"Ic: ", 4, 100);
-			  enviar_float_uart(ic_ua, "mA");
-
-			  // Añadir voltajes de contexto
-			  HAL_UART_Transmit(&huart2, (uint8_t*)" (V(PA7): ", 11, 100);
-			  enviar_float_uart(vsupply_mv, "V, Vc(PC4): ");
-			  enviar_float_uart(vc_mv, "V)\n");
+			  enviar_float_uart(ic_ua, "mA\n");
 
               g_request_adc_ic = 0; // Bajar la bandera
           }
