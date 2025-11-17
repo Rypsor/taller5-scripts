@@ -21,6 +21,7 @@
 /* USER CODE BEGIN PD */
 #define STATE_NORMAL 0
 #define STATE_COUNTDOWN 1
+#define MAX_CURVE_POINTS 110 // (1023 / 10) + 1 = 103 puntos. Usamos 110 por seguridad.
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -38,6 +39,14 @@ TIM_HandleTypeDef htim5;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+// --- Buffers para almacenar datos de las curvas ---
+uint32_t g_vc_buffer[MAX_CURVE_POINTS];
+uint32_t g_vb_buffer[MAX_CURVE_POINTS];
+uint32_t g_vsupply_buffer[MAX_CURVE_POINTS];
+uint32_t g_vc_suavizado[MAX_CURVE_POINTS];
+uint32_t g_vb_suavizado[MAX_CURVE_POINTS];
+uint32_t g_vsupply_suavizado[MAX_CURVE_POINTS];
+uint16_t g_curve_points_count = 0; // Para saber cuántos puntos se guardaron
 
 volatile uint8_t TIMER_DISPLAY_FLAG = 0;
 volatile uint8_t ENCODER_FLAG = 0;
@@ -60,7 +69,7 @@ uint8_t g_uart_rx_data;                     // Variable temporal para el byte qu
 // --- Banderas para solicitar lecturas ADC desde el bucle principal ---
 volatile uint8_t g_request_adc_vc = 0;
 volatile uint8_t g_request_adc_vb = 0;
-volatile uint8_t g_request_sweep_ic_vb = 0;
+volatile uint8_t g_request_curva_ic_vb = 0;
 volatile uint8_t g_request_adc_ic = 0; // Nueva bandera para leer Ic
 volatile uint8_t g_request_diagnostico = 0;
 volatile uint8_t g_request_status_x = 0;      // Nueva bandera para el comando 'x'
@@ -81,10 +90,26 @@ void lightNumber(uint8_t number);
 void update_display_digits(uint16_t value);
 static uint16_t leer_canal_adc(uint32_t channel);
 static void enviar_float_uart(uint32_t valor_mv, char* unidad);
+static void aplicar_media_movil(uint32_t* datos_in, uint32_t* datos_out, uint16_t count, uint8_t n);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void aplicar_media_movil(uint32_t* datos_in, uint32_t* datos_out, uint16_t count, uint8_t n)
+{
+    if (count < n) return; // No hay suficientes datos para aplicar el filtro
+
+    for (uint16_t i = 0; i <= count - n; i++)
+    {
+        uint32_t sum = 0;
+        for (uint8_t j = 0; j < n; j++)
+        {
+            sum += datos_in[i + j];
+        }
+        datos_out[i] = sum / n;
+    }
+}
+
 void update_display_digits(uint16_t value)
 {
     Unidad_mil = value / 1000;
@@ -402,77 +427,109 @@ int main(void)
 		g_request_adc_vb = 0;
 	}
 
-    if (g_request_sweep_ic_vb)
+    if (g_request_curva_ic_vb)
     {
-        // Enviar cabecera de la tabla
+        g_curve_points_count = 0; // Reiniciar el contador
+        for (uint16_t pwm_val = 0; pwm_val <= 1023; pwm_val += 10)
+        {
+            if (g_curve_points_count >= MAX_CURVE_POINTS) break;
+
+            // 1. Establecer el valor de PWM para Vb
+            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, pwm_val);
+            HAL_Delay(50); // Pausa para estabilizar
+
+            // 2. Medir Vc, Vb y Vsupply
+            uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_14);
+            uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
+            uint16_t adc_vsupply = leer_canal_adc(ADC_CHANNEL_7);
+
+            // 3. Guardar en buffers (en milivoltios)
+            g_vc_buffer[g_curve_points_count] = (uint32_t)adc_vc * 3300 / 4095;
+            g_vb_buffer[g_curve_points_count] = (uint32_t)adc_vb * 3300 / 4095;
+            g_vsupply_buffer[g_curve_points_count] = (uint32_t)adc_vsupply * 3300 / 4095;
+
+            g_curve_points_count++;
+        }
+
+        // 1. Aplicar el filtro de media móvil a los datos de Vc, Vb y Vsupply
+        aplicar_media_movil(g_vc_buffer, g_vc_suavizado, g_curve_points_count, 5);
+        aplicar_media_movil(g_vb_buffer, g_vb_suavizado, g_curve_points_count, 5);
+        aplicar_media_movil(g_vsupply_buffer, g_vsupply_suavizado, g_curve_points_count, 5);
+        uint16_t puntos_suavizados = g_curve_points_count - 4;
+
+        // 2. Enviar cabecera de la tabla
         sprintf(g_tx_buffer, "Vb(V),Ic(mA)\n");
         HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
 
-        for (uint16_t pwm_val = 0; pwm_val <= 1023; pwm_val += 10)
+        // 3. Imprimir los datos suavizados
+        for (uint16_t i = 0; i < puntos_suavizados; i++)
         {
-            // 1. Establecer el valor de PWM para Vb
-            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, pwm_val);
+            uint32_t vc_mv = g_vc_suavizado[i];
+            uint32_t vb_mv = g_vb_suavizado[i];
+            uint32_t vsupply_mv = g_vsupply_suavizado[i];
 
-            // 2. Pausa extendida para estabilizar el circuito (RC filters, OpAmps)
-            HAL_Delay(200);
-
-            // 3. Medir Vc y Vb reales
-            uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_14);
-            HAL_Delay(10); // Pequeña pausa para estabilizar el ADC al cambiar de canal
-            uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
-
-            // 4. Medir Vsupply y convertir todo a milivoltios
-            uint16_t adc_vsupply = leer_canal_adc(ADC_CHANNEL_7);
-            uint32_t vsupply_mv = (uint32_t)adc_vsupply * 3300 / 4095;
-            uint32_t vc_mv = (uint32_t)adc_vc * 3300 / 4095;
-            uint32_t vb_mv = (uint32_t)adc_vb * 3300 / 4095;
-
-            // 5. Calcular Ic en microamperios
+            // Calcular Ic con datos suavizados
             uint32_t ic_ua = 0;
             if (vsupply_mv > vc_mv) {
                 ic_ua = (vsupply_mv - vc_mv) * 1000 / 220;
             }
 
-            // 6. Formatear y enviar la línea de datos
             enviar_float_uart(vb_mv, ",");
             enviar_float_uart(ic_ua, "\n");
         }
 
-        g_request_sweep_ic_vb = 0; // Bajar la bandera al finalizar
+        g_request_curva_ic_vb = 0; // Bajar la bandera al finalizar
     }
 
 	if (g_request_curva_ic_vc)
 	{
-		// Enviar cabecera de la tabla
-		sprintf(g_tx_buffer, "Vc(V),Ic(mA)\n");
-		HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
-
+		g_curve_points_count = 0; // Reiniciar el contador
 		for (uint16_t pwm_val = 0; pwm_val <= 1023; pwm_val += 10)
 		{
+			if (g_curve_points_count >= MAX_CURVE_POINTS) break;
+
 			// 1. Establecer el valor de PWM para Vc
 			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pwm_val);
+			HAL_Delay(50); // Pausa para estabilizar
 
-			// 2. Pausa para estabilizar el circuito
-			HAL_Delay(200);
-
-			// 3. Medir Vsupply (PA7) y Vc (PC4)
-			uint16_t adc_vsupply = leer_canal_adc(ADC_CHANNEL_7);
+			// 2. Medir Vc, Vb y Vsupply
 			uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_14);
+			uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
+            uint16_t adc_vsupply = leer_canal_adc(ADC_CHANNEL_7);
 
-			// 4. Convertir a milivoltios
-			uint32_t vsupply_mv = (uint32_t)adc_vsupply * 3300 / 4095;
-			uint32_t vc_mv = (uint32_t)adc_vc * 3300 / 4095;
+			// 3. Guardar en buffers (en milivoltios)
+			g_vc_buffer[g_curve_points_count] = (uint32_t)adc_vc * 3300 / 4095;
+			g_vb_buffer[g_curve_points_count] = (uint32_t)adc_vb * 3300 / 4095;
+			g_vsupply_buffer[g_curve_points_count] = (uint32_t)adc_vsupply * 3300 / 4095;
 
-			// 5. Calcular Ic
-			uint32_t ic_ua = 0;
-			if (vsupply_mv > vc_mv) {
-				ic_ua = (vsupply_mv - vc_mv) * 1000 / 220;
-			}
-
-			// 6. Formatear y enviar la línea de datos
-			enviar_float_uart(vc_mv, ",");
-			enviar_float_uart(ic_ua, "\n");
+			g_curve_points_count++;
 		}
+
+        // 1. Aplicar el filtro de media móvil a los datos de Vc, Vb y Vsupply
+        aplicar_media_movil(g_vc_buffer, g_vc_suavizado, g_curve_points_count, 5);
+        aplicar_media_movil(g_vb_buffer, g_vb_suavizado, g_curve_points_count, 5);
+        aplicar_media_movil(g_vsupply_buffer, g_vsupply_suavizado, g_curve_points_count, 5);
+        uint16_t puntos_suavizados = g_curve_points_count - 4;
+
+        // 2. Enviar cabecera de la tabla
+        sprintf(g_tx_buffer, "Vc(V),Ic(mA)\n");
+        HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+
+        // 3. Imprimir los datos suavizados
+        for (uint16_t i = 0; i < puntos_suavizados; i++)
+        {
+            uint32_t vc_mv = g_vc_suavizado[i];
+            uint32_t vsupply_mv = g_vsupply_suavizado[i];
+
+            // Calcular Ic con datos suavizados
+            uint32_t ic_ua = 0;
+            if (vsupply_mv > vc_mv) {
+                ic_ua = (vsupply_mv - vc_mv) * 1000 / 220;
+            }
+
+            enviar_float_uart(vc_mv, ",");
+            enviar_float_uart(ic_ua, "\n");
+        }
 
 		g_request_curva_ic_vc = 0; // Bajar la bandera al finalizar
 	}
@@ -1140,9 +1197,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		{
 			g_request_adc_vb = 1; // Activar la bandera para el bucle principal
 		}
-		else if (strcmp((char*)g_uart_rx_buffer, "barrido_ic_vb") == 0)
+		else if (strcmp((char*)g_uart_rx_buffer, "curva_ic_vb") == 0)
 		{
-			g_request_sweep_ic_vb = 1; // Activar la bandera para el bucle principal
+			g_request_curva_ic_vb = 1; // Activar la bandera para el bucle principal
 		}
 		else if (strcmp((char*)g_uart_rx_buffer, "curva_ic_vc") == 0)
 		{
