@@ -1260,10 +1260,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			enviar_float_uart(ic_medido_ua, "mA, Ic(e):");
 			enviar_float_uart(ic_estimado_ua, "mA"); // Enviar sin salto de línea
 
-			// Añadir información de PWM
-			char pwm_buffer[35];
-			sprintf(pwm_buffer, " | PwmVc:%u, PwmVb:%u\n", (unsigned int)pwm_vc_val, (unsigned int)pwm_vb_val);
-			HAL_UART_Transmit(&huart2, (uint8_t*)pwm_buffer, strlen(pwm_buffer), 100);
+			// 5. Calcular voltaje teórico de PWM para Vb
+			uint32_t vb_pwm_mv = (uint32_t)pwm_vb_val * 3300 / 1023;
+
+			// 6. Añadir información de PWM en Voltios
+			HAL_UART_Transmit(&huart2, (uint8_t*)" | PwmVc:", 10, 100);
+			enviar_float_uart(vc_pwm_mv, "V, PwmVb:");
+			enviar_float_uart(vb_pwm_mv, "V\n");
 		}
 
         // --- TAREA 1: Comandos LED RGB ---
