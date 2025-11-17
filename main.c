@@ -1248,14 +1248,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 				ic_estimado_ua = (vc_pwm_mv - vc_estimado_mv) * 1000 / 220;
 			}
 
-			// 4. Formatear y enviar todo manualmente para evitar problemas con sprintf
+			// 4. Leer valores PWM
+			uint16_t pwm_vb_val = __HAL_TIM_GET_COMPARE(&htim5, TIM_CHANNEL_1);
+
+			// 5. Formatear y enviar todo manualmente
 			HAL_UART_Transmit(&huart2, (uint8_t*)"Status: Vc(m):", 15, 100);
 			enviar_float_uart(vc_medido_mv, "V, Vc(e):");
 			enviar_float_uart(vc_estimado_mv, "V | Vb(m):");
 			enviar_float_uart(vb_medido_mv, "V, Vb(e):");
 			enviar_float_uart(vb_estimado_mv, "V | Ic(m):");
 			enviar_float_uart(ic_medido_ua, "mA, Ic(e):");
-			enviar_float_uart(ic_estimado_ua, "mA\n");
+			enviar_float_uart(ic_estimado_ua, "mA"); // Enviar sin salto de línea
+
+			// Añadir información de PWM
+			char pwm_buffer[35];
+			sprintf(pwm_buffer, " | PwmVc:%u, PwmVb:%u\n", (unsigned int)pwm_vc_val, (unsigned int)pwm_vb_val);
+			HAL_UART_Transmit(&huart2, (uint8_t*)pwm_buffer, strlen(pwm_buffer), 100);
 		}
 
         // --- TAREA 1: Comandos LED RGB ---
