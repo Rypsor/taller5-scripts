@@ -9,6 +9,7 @@
 #include <string.h> // Para strcmp y strncmp
 #include <stdio.h>  // Para sscanf (leer números de un string)
 #include <stdlib.h> // Para sscanf
+#include <math.h>   // Para powf
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -60,6 +61,7 @@ volatile uint8_t g_request_adc_vc = 0;
 volatile uint8_t g_request_adc_vb = 0;
 volatile uint8_t g_request_sweep_ic_vb = 0;
 volatile uint8_t g_request_adc_ic = 0; // Nueva bandera para leer Ic
+volatile uint8_t g_request_diagnostico = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -336,13 +338,13 @@ int main(void)
 	{
 		uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_6);
 		uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+		uint32_t percentage_x10 = (voltage_mv * 10) / 33; // (voltage_mv / 3300) * 100.0
 		char temp_buf[20];
 
+		// Formato: Vc: X.XXXV (YY.Y%)
 		HAL_UART_Transmit(&huart2, (uint8_t*)"Vc: ", 4, 100);
-		sprintf(temp_buf, "%u", adc_val);
-		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-		HAL_UART_Transmit(&huart2, (uint8_t*)" (", 2, 100);
 
+		// --- Imprimir Voltaje ---
 		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
@@ -351,8 +353,16 @@ int main(void)
 		if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
 		sprintf(temp_buf, "%u", (unsigned int)volt_frac);
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)"V (", 3, 100);
 
-		HAL_UART_Transmit(&huart2, (uint8_t*)" V)\n", 4, 100);
+		// --- Imprimir Porcentaje ---
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 / 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 % 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+		HAL_UART_Transmit(&huart2, (uint8_t*)"%)\n", 3, 100);
 		g_request_adc_vc = 0;
 	}
 
@@ -360,13 +370,13 @@ int main(void)
 	{
 		uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_11);
 		uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+		uint32_t percentage_x10 = (voltage_mv * 10) / 33;
 		char temp_buf[20];
 
+		// Formato: Vb: X.XXXV (YY.Y%)
 		HAL_UART_Transmit(&huart2, (uint8_t*)"Vb: ", 4, 100);
-		sprintf(temp_buf, "%u", adc_val);
-		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-		HAL_UART_Transmit(&huart2, (uint8_t*)" (", 2, 100);
 
+		// --- Imprimir Voltaje ---
 		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
@@ -375,8 +385,16 @@ int main(void)
 		if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
 		sprintf(temp_buf, "%u", (unsigned int)volt_frac);
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)"V (", 3, 100);
 
-		HAL_UART_Transmit(&huart2, (uint8_t*)" V)\n", 4, 100);
+		// --- Imprimir Porcentaje ---
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 / 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 % 10));
+		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+		HAL_UART_Transmit(&huart2, (uint8_t*)"%)\n", 3, 100);
 		g_request_adc_vb = 0;
 	}
 
@@ -503,6 +521,144 @@ int main(void)
 
               g_request_adc_ic = 0; // Bajar la bandera
           }
+      if (g_request_diagnostico)
+      {
+	  char temp_buf[20];
+	  // --- Diagnóstico para Vc ---
+	  sprintf(g_tx_buffer, "\n--- Diagnostico Vc ---\n");
+	  HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 200);
+
+	  for (uint16_t porcentaje = 0; porcentaje <= 100; porcentaje += 5)
+	  {
+		  // 1. Set PWM
+		  uint16_t pwm_val = ((uint32_t)porcentaje * 1023) / 100;
+		  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pwm_val);
+		  HAL_Delay(100); // Pausa para estabilizar
+
+		  // 2. Read ADC
+		  uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_6);
+		  uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+		  uint32_t percentage_x10 = (voltage_mv * 10) / 33;
+		  uint32_t pwm_voltage_mv = ((uint32_t)porcentaje * 3300) / 100;
+
+		  // 3. Print
+		  sprintf(g_tx_buffer, "Set: %u%% (Vpwm: ", porcentaje);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+
+		  sprintf(temp_buf, "%u", (unsigned int)(pwm_voltage_mv / 1000));
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		  uint32_t pwm_volt_frac = pwm_voltage_mv % 1000;
+		  if (pwm_volt_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		  if (pwm_volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		  sprintf(temp_buf, "%u", (unsigned int)pwm_volt_frac);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+		  HAL_UART_Transmit(&huart2, (uint8_t*)"V), Leido: ", 11, 100);
+
+		  sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		  uint32_t volt_frac = voltage_mv % 1000;
+		  if (volt_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		  if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		  sprintf(temp_buf, "%u", (unsigned int)volt_frac);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)"V (", 3, 100);
+
+		  sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 / 10));
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		  sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 % 10));
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)"%), ", 4, 100);
+
+		  // --- Calcular y mostrar el valor estimado ---
+		  float x = (float)voltage_mv / 1000.0f;
+		  float y = (0.26050f * powf(x, 3.0f)) + (-1.24566f * powf(x, 2.0f)) + (2.26281f * x) - 0.01984f;
+		  uint32_t estimado_mv = (uint32_t)(y * 1000.0f);
+
+		  HAL_UART_Transmit(&huart2, (uint8_t*)"Estimado: ", 10, 100);
+		  sprintf(temp_buf, "%u", (unsigned int)(estimado_mv / 1000));
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+		  uint32_t est_frac = estimado_mv % 1000;
+		  if (est_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		  if (est_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+		  sprintf(temp_buf, "%u", (unsigned int)est_frac);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)"V\n", 2, 100);
+	  }
+
+	  // --- Diagnóstico para Vb ---
+	  sprintf(g_tx_buffer, "\n--- Diagnostico Vb ---\n");
+	  HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 200);
+
+	  for (uint16_t porcentaje = 0; porcentaje <= 100; porcentaje += 5)
+		  {
+			  // 1. Set PWM
+			  uint16_t pwm_val = ((uint32_t)porcentaje * 1023) / 100;
+			  __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, pwm_val);
+			  HAL_Delay(100); // Pausa para estabilizar
+
+			  // 2. Read ADC
+			  uint16_t adc_val = leer_canal_adc(ADC_CHANNEL_11);
+			  uint32_t voltage_mv = (uint32_t)adc_val * 3300 / 4095;
+			  uint32_t percentage_x10 = (voltage_mv * 10) / 33;
+			  uint32_t pwm_voltage_mv = ((uint32_t)porcentaje * 3300) / 100;
+
+			  // 3. Print
+			  sprintf(g_tx_buffer, "Set: %u%% (Vpwm: ", porcentaje);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
+
+			  sprintf(temp_buf, "%u", (unsigned int)(pwm_voltage_mv / 1000));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  uint32_t pwm_volt_frac = pwm_voltage_mv % 1000;
+			  if (pwm_volt_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  if (pwm_volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)pwm_volt_frac);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"V), Leido: ", 11, 100);
+
+
+			  sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  uint32_t volt_frac = voltage_mv % 1000;
+			  if (volt_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  if (volt_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)volt_frac);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"V (", 3, 100);
+
+			  sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 / 10));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)(percentage_x10 % 10));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"%), ", 4, 100);
+
+			  // --- Calcular y mostrar el valor estimado ---
+			  float x = (float)voltage_mv / 1000.0f;
+			  float y = (0.26050f * powf(x, 3.0f)) + (-1.24566f * powf(x, 2.0f)) + (2.26281f * x) - 0.01984f;
+			  uint32_t estimado_mv = (uint32_t)(y * 1000.0f);
+
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"Estimado: ", 10, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)(estimado_mv / 1000));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  uint32_t est_frac = estimado_mv % 1000;
+			  if (est_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  if (est_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)est_frac);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"V\n", 2, 100);
+		  }
+
+	  g_request_diagnostico = 0;
+      }
   }
   /* USER CODE END 3 */
 }
@@ -587,7 +743,6 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN ADC1_Init 2 */
   /* USER CODE END ADC1_Init 2 */
 
 }
@@ -762,7 +917,7 @@ static void MX_TIM5_Init(void)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN TIM5_Init 2 */
+  /* USER CODE END TIM5_Init 2 */
   /* USER CODE END TIM5_Init 2 */
   HAL_TIM_MspPostInit(&htim5);
 
@@ -793,7 +948,6 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART2_Init 2 */
   /* USER CODE END USART2_Init 2 */
 
 }
@@ -910,7 +1064,9 @@ static void MX_GPIO_Init(void)
 static uint16_t leer_canal_adc(uint32_t channel)
 {
     ADC_ChannelConfTypeDef sConfig = {0};
-    uint16_t adc_value = 0;
+    uint32_t adc_sum = 0;
+	uint16_t adc_value = 0;
+	const int num_samples = 16;
 
     // 1. Configurar el canal específico que queremos leer
     sConfig.Channel = channel;
@@ -921,13 +1077,18 @@ static uint16_t leer_canal_adc(uint32_t channel)
         return 0; // Retornar 0 en caso de error de configuración
     }
 
-    // 2. Iniciar, leer y detener la conversión
-    HAL_ADC_Start(&hadc1);
-    if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
-    {
-        adc_value = HAL_ADC_GetValue(&hadc1);
-    }
-    // HAL_ADC_Stop(&hadc1); // Eliminado: en modo de conversión única (no continuo), se detiene solo.
+    // 2. Bucle de sobremuestreo y promediado
+	for (int i = 0; i < num_samples; i++)
+	{
+		HAL_ADC_Start(&hadc1);
+		if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
+		{
+			adc_sum += HAL_ADC_GetValue(&hadc1);
+		}
+	}
+
+    // 3. Calcular el promedio
+    adc_value = adc_sum / num_samples;
 
     return adc_value;
 }
@@ -949,18 +1110,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         // --- TAREA 3: Comandos PWM (Formato vbXXX) ---
         if (strncmp((char*)g_uart_rx_buffer, "vb", 2) == 0)
         {
-            uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
-            if (nuevo_valor > 1023) nuevo_valor = 1023;
-            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, nuevo_valor);
-            sprintf(g_tx_buffer, "Vb (PA0) ajustado a: %u\n", nuevo_valor);
+            uint16_t porcentaje = atoi((char*)&g_uart_rx_buffer[2]);
+            if (porcentaje > 100) porcentaje = 100;
+			uint16_t pwm_val = ((uint32_t)porcentaje * 1023) / 100;
+            __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_1, pwm_val);
+            sprintf(g_tx_buffer, "Vb (PA0) ajustado a: %u%% (PWM: %u)\n", porcentaje, pwm_val);
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
         }
         else if (strncmp((char*)g_uart_rx_buffer, "vc", 2) == 0)
         {
-            uint16_t nuevo_valor = atoi((char*)&g_uart_rx_buffer[2]);
-            if (nuevo_valor > 1023) nuevo_valor = 1023;
-            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, nuevo_valor);
-            sprintf(g_tx_buffer, "Vc (PA5) ajustado a: %u\n", nuevo_valor);
+            uint16_t porcentaje = atoi((char*)&g_uart_rx_buffer[2]);
+            if (porcentaje > 100) porcentaje = 100;
+            uint16_t pwm_val = ((uint32_t)porcentaje * 1023) / 100;
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pwm_val);
+            sprintf(g_tx_buffer, "Vc (PA5) ajustado a: %u%% (PWM: %u)\n", porcentaje, pwm_val);
             HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
         }
 
@@ -980,6 +1143,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		else if (strcmp((char*)g_uart_rx_buffer, "leer_ic") == 0)
 		{
 			g_request_adc_ic = 1; // Activar la bandera para el bucle principal
+		}
+		else if (strcmp((char*)g_uart_rx_buffer, "diagnostico") == 0)
+		{
+			g_request_diagnostico = 1; // Activar la bandera para el bucle principal
 		}
 
         // --- TAREA 1: Comandos LED RGB ---
