@@ -1,4 +1,3 @@
-
 /* USER CODE BEGIN Header */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
@@ -785,6 +784,18 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_6;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
   /* USER CODE END ADC1_Init 2 */
 
 }
@@ -959,7 +970,8 @@ static void MX_TIM5_Init(void)
   {
     Error_Handler();
   }
-  /* USER CODE END TIM5_Init 2 */
+  /* USER CODE BEGIN TIM5_Init 2 */
+
   /* USER CODE END TIM5_Init 2 */
   HAL_TIM_MspPostInit(&htim5);
 
@@ -990,6 +1002,8 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN USART2_Init 2 */
+
   /* USER CODE END USART2_Init 2 */
 
 }
@@ -1070,7 +1084,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : ENCODER_SW_Pin */
   GPIO_InitStruct.Pin = ENCODER_SW_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENCODER_SW_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA8 */
@@ -1098,7 +1112,6 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
 }
-
 
 /* USER CODE BEGIN 4 */
 
