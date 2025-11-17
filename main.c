@@ -60,6 +60,7 @@ volatile uint8_t g_request_adc_vc = 0;
 volatile uint8_t g_request_adc_vb = 0;
 volatile uint8_t g_request_sweep_ic_vb = 0;
 volatile uint8_t g_request_adc_ic = 0; // Nueva bandera para leer Ic
+volatile uint8_t g_request_status_x = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -503,6 +504,77 @@ int main(void)
 
               g_request_adc_ic = 0; // Bajar la bandera
           }
+		  if (g_request_status_x)
+		  {
+			  char temp_buf[20];
+
+			  // 1. Medir Vc
+			  uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_6);
+			  uint32_t vc_mv = (uint32_t)adc_vc * 3300 / 4095;
+
+			  // 2. Medir Vb
+			  uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
+			  uint32_t vb_mv = (uint32_t)adc_vb * 3300 / 4095;
+
+			  // 3. Calcular Ic y Vsupply_c
+			  uint16_t pwm_vc_val = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
+			  uint32_t vc_supply_mv = (uint32_t)pwm_vc_val * 3300 / 1023;
+			  uint32_t ic_ua = 0;
+			  if (vc_supply_mv > vc_mv) {
+				  ic_ua = (vc_supply_mv - vc_mv) * 1000 / 220;
+			  }
+
+			  // 4. Imprimir todo en una línea
+			  // Vc:
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"Vc: ", 4, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)(vc_mv / 1000));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  uint32_t vc_frac = vc_mv % 1000;
+			  if (vc_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  if (vc_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)vc_frac);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"V, ", 3, 100);
+
+			  // Vb:
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"Vb: ", 4, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)(vb_mv / 1000));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  uint32_t vb_frac = vb_mv % 1000;
+			  if (vb_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  if (vb_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)vb_frac);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"V, ", 3, 100);
+
+			  // Vsupply_c:
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"Vsupply_c: ", 11, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)(vc_supply_mv / 1000));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  uint32_t vsupply_c_frac = vc_supply_mv % 1000;
+			  if (vsupply_c_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  if (vsupply_c_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)vsupply_c_frac);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"V, ", 3, 100);
+
+			  // Ic:
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"Ic: ", 4, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)(ic_ua / 1000));
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
+			  uint32_t ic_frac = ic_ua % 1000;
+			  if (ic_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  if (ic_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
+			  sprintf(temp_buf, "%u", (unsigned int)ic_frac);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
+			  HAL_UART_Transmit(&huart2, (uint8_t*)"mA\n", 4, 100);
+
+			  g_request_status_x = 0;
+		  }
   }
   /* USER CODE END 3 */
 }
@@ -980,6 +1052,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		else if (strcmp((char*)g_uart_rx_buffer, "leer_ic") == 0)
 		{
 			g_request_adc_ic = 1; // Activar la bandera para el bucle principal
+		}
+		else if (strcmp((char*)g_uart_rx_buffer, "x") == 0)
+		{
+			g_request_status_x = 1; // Activar la bandera para el bucle principal
 		}
 
         // --- TAREA 1: Comandos LED RGB ---
