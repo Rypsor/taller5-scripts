@@ -61,6 +61,7 @@ volatile uint8_t g_request_adc_vb = 0;
 volatile uint8_t g_request_sweep_ic_vb = 0;
 volatile uint8_t g_request_adc_ic = 0; // Nueva bandera para leer Ic
 volatile uint8_t g_request_diagnostico = 0;
+volatile uint8_t g_request_status_x = 0;      // Nueva bandera para el comando 'x'
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -428,7 +429,7 @@ int main(void)
     if (g_request_sweep_ic_vb)
     {
         // Enviar cabecera de la tabla
-        sprintf(g_tx_buffer, "Vb(V),Ic(mA)\n");
+        sprintf(g_tx_buffer, "Vb(V),Ic(mA),Ic_est(mA)\n");
         HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
 
         for (uint16_t pwm_val = 0; pwm_val <= 1023; pwm_val += 50)
@@ -444,78 +445,55 @@ int main(void)
             HAL_Delay(10); // Pequeña pausa para estabilizar el ADC al cambiar de canal
             uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
 
-            // 4. Convertir lecturas ADC y PWM de Vc a milivoltios
-            uint16_t pwm_vc_val = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
-            uint32_t vc_pwm_mv = (uint32_t)pwm_vc_val * 3300 / 1023;
+            // 4. Medir Vsupply y convertir todo a milivoltios
+            uint16_t adc_vsupply = leer_canal_adc(ADC_CHANNEL_7);
+            uint32_t vsupply_medido_mv = (uint32_t)adc_vsupply * 3300 / 4095;
             uint32_t vc_medido_mv = (uint32_t)adc_vc * 3300 / 4095;
             uint32_t vb_mv = (uint32_t)adc_vb * 3300 / 4095;
 
-            // 5. Calcular Ic en microamperios (corregido)
-            uint32_t ic_ua = 0;
-			if (vc_pwm_mv > vc_medido_mv) {
-				ic_ua = (vc_pwm_mv - vc_medido_mv) * 1000 / 220;
+            // 5. Calcular Ic (Medido y Estimado) en microamperios
+            uint32_t ic_medido_ua = 0;
+			if (vsupply_medido_mv > vc_medido_mv) {
+				ic_medido_ua = (vsupply_medido_mv - vc_medido_mv) * 1000 / 220;
+			}
+			uint32_t vc_estimado_mv = calcular_voltaje_estimado_mv(vc_medido_mv);
+			uint32_t ic_estimado_ua = 0;
+			if (vsupply_medido_mv > vc_estimado_mv) {
+				ic_estimado_ua = (vsupply_medido_mv - vc_estimado_mv) * 1000 / 220;
 			}
 
-            // 6. Formatear y enviar la línea de datos manualmente para evitar problemas con sprintf
-            char temp_buf[10];
-
-            // --- Vb ---
-            sprintf(temp_buf, "%u", (unsigned int)(vb_mv / 1000));
-            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-            HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
-
-            uint32_t vb_frac = vb_mv % 1000;
-            if (vb_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
-            if (vb_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
-            sprintf(temp_buf, "%u", (unsigned int)vb_frac);
-            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-
-            // --- Coma ---
-            HAL_UART_Transmit(&huart2, (uint8_t*)",", 1, 100);
-
-            // --- Ic ---
-            sprintf(temp_buf, "%u", (unsigned int)(ic_ua / 1000));
-            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-            HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
-
-            uint32_t ic_frac = ic_ua % 1000;
-            if (ic_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
-            if (ic_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
-            sprintf(temp_buf, "%u", (unsigned int)ic_frac);
-            HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
-
-            // --- Salto de línea ---
-            HAL_UART_Transmit(&huart2, (uint8_t*)"\n", 1, 100);
+            // 6. Formatear y enviar la línea de datos
+            enviar_float_uart(vb_mv, ",");
+            enviar_float_uart(ic_medido_ua, ",");
+            enviar_float_uart(ic_estimado_ua, "\n");
         }
 
         g_request_sweep_ic_vb = 0; // Bajar la bandera al finalizar
     }
       if (g_request_adc_ic)
           {
-              // 1. Obtener el valor actual del PWM para Vc (PA5 -> TIM2_CH1)
-              uint16_t pwm_vc_val = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
+			  // 1. Medir voltajes de Vsupply (PA7) y Vc (PA6)
+			  uint16_t adc_vsupply = leer_canal_adc(ADC_CHANNEL_7);
+			  uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_6);
 
-              // 2. Medir el voltaje real en el colector (Vc)
-              uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_6);
+			  // 2. Convertir a milivoltios
+			  uint32_t vsupply_medido_mv = (uint32_t)adc_vsupply * 3300 / 4095;
+			  uint32_t vc_medido_mv = (uint32_t)adc_vc * 3300 / 4095;
 
-              // 3. Convertir ambos a milivoltios
-              uint32_t vc_pwm_mv = (uint32_t)pwm_vc_val * 3300 / 1023; // Voltaje de alimentación del colector
-              uint32_t vc_medido_mv = (uint32_t)adc_vc * 3300 / 4095;    // Voltaje medido en el colector
-
-              // 4. Calcular Ic MEDIDO en microamperios para mantener la precisión
+              // 3. Calcular Ic MEDIDO en microamperios
               uint32_t ic_medido_ua = 0;
-              if (vc_pwm_mv > vc_medido_mv) {
-                  ic_medido_ua = (vc_pwm_mv - vc_medido_mv) * 1000 / 220;
+              if (vsupply_medido_mv > vc_medido_mv) {
+                  ic_medido_ua = (vsupply_medido_mv - vc_medido_mv) * 1000 / 220;
               }
 
-			  // 5. Calcular Ic ESTIMADO
+			  // 4. Calcular Ic ESTIMADO
 			  uint32_t vc_estimado_mv = calcular_voltaje_estimado_mv(vc_medido_mv);
 			  uint32_t ic_estimado_ua = 0;
-			  if (vc_pwm_mv > vc_estimado_mv) {
-				  ic_estimado_ua = (vc_pwm_mv - vc_estimado_mv) * 1000 / 220;
+			  if (vsupply_medido_mv > vc_estimado_mv) {
+				  ic_estimado_ua = (vsupply_medido_mv - vc_estimado_mv) * 1000 / 220;
 			  }
 
-              // 6. Formatear y enviar
+              // 5. Formatear y enviar
               char temp_buf[20];
               HAL_UART_Transmit(&huart2, (uint8_t*)"Ic Medido: ", 11, 100);
               sprintf(temp_buf, "%u", (unsigned int)(ic_medido_ua / 1000));
@@ -539,18 +517,18 @@ int main(void)
 			  HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 
               // Añadir voltajes de contexto
-              HAL_UART_Transmit(&huart2, (uint8_t*)" mA (Vsupply: ", 15, 100);
-              // Vsupply
-              sprintf(temp_buf, "%u", (unsigned int)(vc_pwm_mv / 1000));
+              HAL_UART_Transmit(&huart2, (uint8_t*)" mA (V(PA7): ", 14, 100);
+              // Vsupply medido en PA7
+              sprintf(temp_buf, "%u", (unsigned int)(vsupply_medido_mv / 1000));
               HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
               HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
-              uint32_t vs_frac = vc_pwm_mv % 1000;
+              uint32_t vs_frac = vsupply_medido_mv % 1000;
               if (vs_frac < 100) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
               if (vs_frac < 10) HAL_UART_Transmit(&huart2, (uint8_t*)"0", 1, 100);
               sprintf(temp_buf, "%u", (unsigned int)vs_frac);
               HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 
-              HAL_UART_Transmit(&huart2, (uint8_t*)"V, Vc: ", 7, 100);
+              HAL_UART_Transmit(&huart2, (uint8_t*)"V, Vc(m): ", 10, 100);
 
               // Vc
               sprintf(temp_buf, "%u", (unsigned int)(vc_medido_mv / 1000));
@@ -700,6 +678,58 @@ int main(void)
 
 	  g_request_diagnostico = 0;
       }
+
+	  if (g_request_status_x)
+	  {
+		  // --- Comando de Estado Rápido ---
+		  // 1. Medir Vc y Vb
+		  uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_6);
+		  uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
+		  uint32_t vc_medido_mv = (uint32_t)adc_vc * 3300 / 4095;
+		  uint32_t vb_medido_mv = (uint32_t)adc_vb * 3300 / 4095;
+
+		  // 2. Calcular valores estimados
+		  uint32_t vc_estimado_mv = calcular_voltaje_estimado_mv(vc_medido_mv);
+		  uint32_t vb_estimado_mv = calcular_voltaje_estimado_mv(vb_medido_mv);
+
+		  // 3. Medir Vsupply y calcular Ic (Medido y Estimado)
+		  uint16_t adc_vsupply = leer_canal_adc(ADC_CHANNEL_7);
+		  uint32_t vsupply_medido_mv = (uint32_t)adc_vsupply * 3300 / 4095;
+		  uint32_t ic_medido_ua = 0;
+		  if (vsupply_medido_mv > vc_medido_mv) {
+			  ic_medido_ua = (vsupply_medido_mv - vc_medido_mv) * 1000 / 220;
+		  }
+		  uint32_t ic_estimado_ua = 0;
+		  if (vsupply_medido_mv > vc_estimado_mv) {
+			  ic_estimado_ua = (vsupply_medido_mv - vc_estimado_mv) * 1000 / 220;
+		  }
+
+		  // 4. Leer valores PWM para mostrar su voltaje teórico
+		  uint16_t pwm_vc_val = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
+		  uint16_t pwm_vb_val = __HAL_TIM_GET_COMPARE(&htim5, TIM_CHANNEL_1);
+		  uint32_t vc_pwm_mv = (uint32_t)pwm_vc_val * 3300 / 1023;
+		  uint32_t vb_pwm_mv = (uint32_t)pwm_vb_val * 3300 / 1023;
+
+		  // 5. Formatear y enviar todo manualmente
+		  HAL_UART_Transmit(&huart2, (uint8_t*)"Status: Vc(m):", 15, 100);
+		  enviar_float_uart(vc_medido_mv, "V, Vc(e):");
+		  enviar_float_uart(vc_estimado_mv, "V | Vb(m):");
+		  enviar_float_uart(vb_medido_mv, "V, Vb(e):");
+		  enviar_float_uart(vb_estimado_mv, "V | Ic(m):");
+		  enviar_float_uart(ic_medido_ua, "mA, Ic(e):");
+		  enviar_float_uart(ic_estimado_ua, "mA"); // Enviar sin salto de línea
+
+		  // 6. Añadir información de PWM en Voltios
+		  HAL_UART_Transmit(&huart2, (uint8_t*)" | PwmVc:", 10, 100);
+		  enviar_float_uart(vc_pwm_mv, "V, PwmVb:");
+		  enviar_float_uart(vb_pwm_mv, "V"); // Quitar salto de línea
+
+		  // 7. Añadir voltaje medido en PA7
+		  HAL_UART_Transmit(&huart2, (uint8_t*)" | V(PA7):", 11, 100);
+		  enviar_float_uart(vsupply_medido_mv, "V\n");
+
+		  g_request_status_x = 0; // Bajar la bandera
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -787,7 +817,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_6;
+  sConfig.Channel = ADC_CHANNEL_7;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -1238,48 +1268,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		}
 		else if (strcmp((char*)g_uart_rx_buffer, "x") == 0)
 		{
-			// --- Comando de Estado Rápido ---
-			// 1. Medir Vc y Vb
-			uint16_t adc_vc = leer_canal_adc(ADC_CHANNEL_6);
-			uint16_t adc_vb = leer_canal_adc(ADC_CHANNEL_11);
-			uint32_t vc_medido_mv = (uint32_t)adc_vc * 3300 / 4095;
-			uint32_t vb_medido_mv = (uint32_t)adc_vb * 3300 / 4095;
-
-			// 2. Calcular valores estimados
-			uint32_t vc_estimado_mv = calcular_voltaje_estimado_mv(vc_medido_mv);
-			uint32_t vb_estimado_mv = calcular_voltaje_estimado_mv(vb_medido_mv);
-
-			// 3. Calcular Ic (Medido y Estimado)
-			uint16_t pwm_vc_val = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
-			uint32_t vc_pwm_mv = (uint32_t)pwm_vc_val * 3300 / 1023;
-			uint32_t ic_medido_ua = 0;
-			if (vc_pwm_mv > vc_medido_mv) {
-				ic_medido_ua = (vc_pwm_mv - vc_medido_mv) * 1000 / 220;
-			}
-			uint32_t ic_estimado_ua = 0;
-			if (vc_pwm_mv > vc_estimado_mv) {
-				ic_estimado_ua = (vc_pwm_mv - vc_estimado_mv) * 1000 / 220;
-			}
-
-			// 4. Leer valores PWM
-			uint16_t pwm_vb_val = __HAL_TIM_GET_COMPARE(&htim5, TIM_CHANNEL_1);
-
-			// 5. Formatear y enviar todo manualmente
-			HAL_UART_Transmit(&huart2, (uint8_t*)"Status: Vc(m):", 15, 100);
-			enviar_float_uart(vc_medido_mv, "V, Vc(e):");
-			enviar_float_uart(vc_estimado_mv, "V | Vb(m):");
-			enviar_float_uart(vb_medido_mv, "V, Vb(e):");
-			enviar_float_uart(vb_estimado_mv, "V | Ic(m):");
-			enviar_float_uart(ic_medido_ua, "mA, Ic(e):");
-			enviar_float_uart(ic_estimado_ua, "mA"); // Enviar sin salto de línea
-
-			// 5. Calcular voltaje teórico de PWM para Vb
-			uint32_t vb_pwm_mv = (uint32_t)pwm_vb_val * 3300 / 1023;
-
-			// 6. Añadir información de PWM en Voltios
-			HAL_UART_Transmit(&huart2, (uint8_t*)" | PwmVc:", 10, 100);
-			enviar_float_uart(vc_pwm_mv, "V, PwmVb:");
-			enviar_float_uart(vb_pwm_mv, "V\n");
+			g_request_status_x = 1; // Activar la bandera para el bucle principal
 		}
 
         // --- TAREA 1: Comandos LED RGB ---
