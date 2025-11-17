@@ -1,4 +1,3 @@
-
 /* USER CODE BEGIN Header */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
@@ -130,7 +129,7 @@ void lightNumber(uint8_t number)
         HAL_GPIO_WritePin(SEGMENTO_B_GPIO_Port, SEGMENTO_B_Pin, GPIO_PIN_RESET);
         HAL_GPIO_WritePin(SEGMENTO_C_GPIO_Port, SEGMENTO_C_Pin, GPIO_PIN_RESET);
         HAL_GPIO_WritePin(SEGMENTO_D_GPIO_Port, SEGMENTO_D_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(SEGMENTO_G_GPIO_Port, SEGMENTO_G_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(SEGMhttps://github.com/Rypsor/taller5-scripts/pull/13/conflict?name=main.c&ancestor_oid=a1758a00a16b0501bc94e51b411c5d186f8e6f4e&base_oid=406a3295d12ef2619979ff57e768f74063e68d88&head_oid=9081d8aab0c97aad1783483b73954685ca411b94ENTO_G_GPIO_Port, SEGMENTO_G_Pin, GPIO_PIN_RESET);
         break;
     case 4:
         HAL_GPIO_WritePin(SEGMENTO_B_GPIO_Port, SEGMENTO_B_Pin, GPIO_PIN_RESET);
@@ -344,10 +343,12 @@ int main(void)
 		uint32_t percentage_x10 = (voltage_mv * 10) / 33; // (voltage_mv / 3300) * 100.0
 		char temp_buf[20];
 
-		// Formato: Vc: X.XXXV (YY.Y%)
-		HAL_UART_Transmit(&huart2, (uint8_t*)"Vc: ", 4, 100);
+		uint32_t estimado_mv = calcular_voltaje_estimado_mv(voltage_mv);
 
-		// --- Imprimir Voltaje ---
+		// Formato: Vc Medido: X.XXXV (YY.Y%), Vc Estimado: Z.ZZZV
+		HAL_UART_Transmit(&huart2, (uint8_t*)"Vc Medido: ", 11, 100);
+
+		// --- Imprimir Voltaje Medido ---
 		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
@@ -376,10 +377,12 @@ int main(void)
 		uint32_t percentage_x10 = (voltage_mv * 10) / 33;
 		char temp_buf[20];
 
-		// Formato: Vb: X.XXXV (YY.Y%)
-		HAL_UART_Transmit(&huart2, (uint8_t*)"Vb: ", 4, 100);
+		uint32_t estimado_mv = calcular_voltaje_estimado_mv(voltage_mv);
 
-		// --- Imprimir Voltaje ---
+		// Formato: Vb Medido: X.XXXV (YY.Y%), Vb Estimado: Z.ZZZV
+		HAL_UART_Transmit(&huart2, (uint8_t*)"Vb Medido: ", 11, 100);
+
+		// --- Imprimir Voltaje Medido ---
 		sprintf(temp_buf, "%u", (unsigned int)(voltage_mv / 1000));
 		HAL_UART_Transmit(&huart2, (uint8_t*)temp_buf, strlen(temp_buf), 100);
 		HAL_UART_Transmit(&huart2, (uint8_t*)".", 1, 100);
@@ -404,7 +407,7 @@ int main(void)
     if (g_request_sweep_ic_vb)
     {
         // Enviar cabecera de la tabla
-        sprintf(g_tx_buffer, "Vb(V),Ic(mA)\n");
+        sprintf(g_tx_buffer, "Vb(V),Ic(mA),Ic_est(mA)\n");
         HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
 
         for (uint16_t pwm_val = 0; pwm_val <= 1023; pwm_val += 10)
@@ -731,6 +734,18 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_7;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
   /* USER CODE END ADC1_Init 2 */
 
 }
@@ -905,7 +920,8 @@ static void MX_TIM5_Init(void)
   {
     Error_Handler();
   }
-  /* USER CODE END TIM5_Init 2 */
+  /* USER CODE BEGIN TIM5_Init 2 */
+
   /* USER CODE END TIM5_Init 2 */
   HAL_TIM_MspPostInit(&htim5);
 
@@ -936,6 +952,8 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN USART2_Init 2 */
+
   /* USER CODE END USART2_Init 2 */
 
 }
@@ -1016,7 +1034,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : ENCODER_SW_Pin */
   GPIO_InitStruct.Pin = ENCODER_SW_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENCODER_SW_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA8 */
@@ -1044,7 +1062,6 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
 }
-
 
 /* USER CODE BEGIN 4 */
 
