@@ -482,7 +482,13 @@ int main(void)
         aplicar_media_movil(g_curva_buffer, g_vsupply_suavizado, g_curve_points_count, 5, offsetof(PuntoCurva, vsupply_mv));
         uint16_t puntos_suavizados = g_curve_points_count - 4;
 
-        // 2. Enviar cabecera de la tabla
+        // Imprimir voltaje de contexto
+        uint16_t adc_vc_context = leer_canal_adc(ADC_CHANNEL_14);
+        uint32_t vc_mv_context = (uint32_t)adc_vc_context * 3300 / 4095;
+        HAL_UART_Transmit(&huart2, (uint8_t*)"datos usando vc = ", 18, 100);
+        enviar_float_uart(vc_mv_context, "V\n");
+
+        // Enviar cabecera de la tabla
         sprintf(g_tx_buffer, "Vb(V);Ic(mA)\n");
         HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
 
@@ -539,7 +545,13 @@ int main(void)
         aplicar_media_movil(g_curva_buffer, g_vsupply_suavizado, g_curve_points_count, 5, offsetof(PuntoCurva, vsupply_mv));
         uint16_t puntos_suavizados = g_curve_points_count - 4;
 
-        // 2. Enviar cabecera de la tabla
+        // Imprimir voltaje de contexto
+        uint16_t adc_vb_context = leer_canal_adc(ADC_CHANNEL_11);
+        uint32_t vb_mv_context = (uint32_t)adc_vb_context * 3300 / 4095;
+        HAL_UART_Transmit(&huart2, (uint8_t*)"datos usando vb = ", 18, 100);
+        enviar_float_uart(vb_mv_context, "V\n");
+
+        // Enviar cabecera de la tabla
         sprintf(g_tx_buffer, "Vc(V);Ic(mA)\n");
         HAL_UART_Transmit(&huart2, (uint8_t*)g_tx_buffer, strlen(g_tx_buffer), 100);
 
