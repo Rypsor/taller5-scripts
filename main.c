@@ -5,37 +5,55 @@
   * @file           : main.c
   * @brief          : Firmware para un trazador de curvas de transistores BJT.
   *
-  * Este programa controla una placa STM32 Nucleo-F411RE para caracterizar
-  * un transistor BJT. Permite generar señales PWM para polarizar la base (Vb)
-  * y el colector (Vc) del transistor, y utiliza el ADC para medir los
-  * voltajes resultantes.
+  * Este programa integra dos funcionalidades principales en una placa STM32:
   *
-  * La comunicación se realiza a través de una interfaz UART, aceptando comandos
-  * de texto para:
-  *   - Ajustar los voltajes Vc y Vb.
-  *   - Realizar lecturas individuales de Vc, Vb e Ic.
-  *   - Generar curvas características (Ic vs Vb) e (Ic vs Vc).
+  * 1. Trazador de Curvas de Transistores BJT:
+  *    - Controla la polarización de un BJT mediante PWM (Vb y Vc).
+  *    - Mide los voltajes resultantes con el ADC.
+  *    - Se comunica a través de UART para recibir comandos y enviar datos.
+  *    - Genera curvas características (Ic-Vb, Ic-Vc) con un pipeline de
+  *      post-procesamiento que incluye ordenamiento y filtro de media móvil.
   *
-  * El sistema implementa un pipeline de post-procesamiento para las curvas:
-  * 1. Captura todos los puntos de la curva en un buffer.
-  * 2. Ordena los datos por el eje X para corregir el ruido del ADC.
-  * 3. Aplica un filtro de media móvil para suavizar los resultados.
-  * 4. Imprime la tabla de datos final.
+  * 2. Interfaz de Usuario con Display y Encoder:
+  *    - Controla un display de 7 segmentos de 4 dígitos mediante multiplexación.
+  *    - Permite al usuario interactuar a través de un encoder rotatorio para
+  *      modificar un valor en el display.
+  *    - Incluye una funcionalidad de cuenta regresiva activada por el pulsador
+  *      del encoder.
+  *    - Controla un LED RGB para indicar estados.
   *
   ******************************************************************************
   *
   *                       ASIGNACIÓN DE PINES
   * ============================================================================
+  * -- Trazador de Curvas --
   * PA0 (TIM5_CH1) : Salida PWM para control del voltaje de base (Vb).
   * PA5 (TIM2_CH1) : Salida PWM para control del voltaje de colector (Vc).
-  *
   * PC1 (ADC1_IN11): Entrada ADC para medición del voltaje de base (Vb).
   * PC4 (ADC1_IN14): Entrada ADC para medición del voltaje de colector (Vc).
   * PA7 (ADC1_IN7) : Entrada ADC para medición del voltaje de alimentación (Vsupply).
   *
+  * -- Display 7 Segmentos --
+  * Seg A -> PB12      D1 (Unidades) -> PB7
+  * Seg B -> PA12      D2 (Decenas)  -> PC6
+  * Seg C -> PC11      D3 (Centenas) -> PC5
+  * Seg D -> PC12      D4 (Millares) -> PC13
+  * Seg E -> PC10
+  * Seg F -> PA11
+  * Seg G -> PD2
+  *
+  * -- Encoder Rotatorio --
+  * CLK -> PB2 (con EXTI)
+  * DT  -> PB1
+  * SW  -> PB15 (con EXTI)
+  *
+  * -- LEDs y Comunicación --
+  * LED Rojo -> PB4
+  * LED Verde -> PA9
+  * LED Azul -> PC7
+  * LED Blinky -> PC9
   * PA2 (USART2_TX): Pin de transmisión UART para comunicación con el PC.
   * PA3 (USART2_RX): Pin de recepción UART para comunicación con el PC.
-  *
   * PA8 (MCO1)     : Salida de reloj del microcontrolador para depuración.
   *
   ******************************************************************************
@@ -161,6 +179,10 @@ void enviar_mensaje_bienvenida(void) {
     sprintf(buf, "  leer_vb        - Lee el voltaje de la base\n");
     HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
     sprintf(buf, "  leer_ic        - Lee la corriente del colector\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  rojo/verde/azul- Controla el LED RGB\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  apagar         - Apaga el LED RGB\n");
     HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
     sprintf(buf, "  curva_ic_vb_vcXX - Genera curva Ic vs Vb (Vb barrido) con Vc constante al XX%%\n");
     HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
