@@ -100,10 +100,33 @@ static uint16_t leer_canal_adc(uint32_t channel);
 static void enviar_float_uart(uint32_t valor_mv, char* unidad);
 static void aplicar_media_movil(PuntoCurva* datos_in, uint32_t* datos_out, uint16_t count, uint8_t n, size_t offset);
 void ordenar_puntos_curva(PuntoCurva* puntos, uint16_t count, uint8_t ordenar_por_vc);
+void enviar_mensaje_bienvenida(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void enviar_mensaje_bienvenida(void) {
+    char buf[128];
+    HAL_UART_Transmit(&huart2, (uint8_t*)"\n--- Sistema Trazador de Curvas BJT ---\n", 42, 200);
+    HAL_UART_Transmit(&huart2, (uint8_t*)"Comandos disponibles:\n", 22, 200);
+
+    sprintf(buf, "  vcXX           - Ajusta el voltaje del colector al XX%% del PWM\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  vbXX           - Ajusta el voltaje de la base al XX%% del PWM\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  leer_vc        - Lee el voltaje del colector\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  leer_vb        - Lee el voltaje de la base\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  leer_ic        - Lee la corriente del colector\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  curva_ic_vb_vcXX - Genera curva Ic vs Vb (Vb barrido) con Vc constante al XX%%\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    sprintf(buf, "  curva_ic_vc_vbXX - Genera curva Ic vs Vc (Vc barrido) con Vb constante al XX%%\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), 200);
+    HAL_UART_Transmit(&huart2, (uint8_t*)"---------------------------------------\n\n", 40, 200);
+}
+
 void ordenar_puntos_curva(PuntoCurva* puntos, uint16_t count, uint8_t ordenar_por_vc) {
     for (uint16_t i = 0; i < count - 1; i++) {
         for (uint16_t j = 0; j < count - i - 1; j++) {
@@ -291,6 +314,10 @@ int main(void)
 
    // --- Iniciar la recepción UART por Interrupción ---
    HAL_UART_Receive_IT(&huart2, &g_uart_rx_data, 1);
+
+   // --- Enviar mensaje de bienvenida ---
+   HAL_Delay(100); // Pausa para asegurar que el terminal serie esté listo
+   enviar_mensaje_bienvenida();
   /* USER CODE END 2 */
 
   /* Infinite loop */
