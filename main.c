@@ -1,33 +1,18 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file           : joystick_uart.c
-  * @brief          : Lectura de joystick con ADC+DMA y comunicación UART
+  * @file           : main.c
+  * @brief          : Main program body
   ******************************************************************************
-  * Descripción breve:
-  * Este módulo configura el ADC para leer dos canales (Eje X en PA0 y Eje Y en PA1)
-  * usando DMA en modo continuo, y envía periódicamente por UART los valores
-  * RAW del joystick (0..4095) en formato "X: #### | Y: ####".
-  * Además inicia la recepción por UART mediante DMA para recibir comandos o
-  * pulsaciones de tecla. Si se recibe el carácter 'a' se responde con un
-  * mensaje de confirmación usando transmisión DMA.
+  * @attention
   *
-  * Entradas / Salidas relevantes:
-  *  - ADC Channel 0 (PA0): Eje X del joystick
-  *  - ADC Channel 1 (PA1): Eje Y del joystick
-  *  - UART2 (PA2/PA3): Comunicación serie a 115200 baudios
-  *  - DMA para ADC y UART para transferencia eficiente sin bloqueo
+  * Copyright (c) 2025 STMicroelectronics.
+  * All rights reserved.
   *
-  * Comportamiento:
-  *  - El ADC se calibra y se arranca en modo DMA con 2 conversiones en bucle.
-  *  - Un bucle principal formatea y envía los valores leídos cada 100 ms.
-  *  - La recepción UART se mantiene activa con HAL_UART_Receive_DMA; al recibir
-  *    el byte 'a' se envía una respuesta de confirmación mediante DMA.
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
   *
-  * Notas:
-  *  - Los valores enviados son RAW (0..4095). Si se necesita voltaje en mV,
-  *    convertir: V_mV = raw * Vref_mV / 4095 (Vref típico = 3300 mV).
-  *  - El uso de DMA evita bloqueos en ISR y reduce carga de CPU.
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -39,6 +24,8 @@
 #include <stdio.h>  // Necesario para sprintf
 #include <string.h>
 
+#include "ssd1306.h" // OLED
+#include "ssd1306_tests.h" // OLED
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +46,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
+
+I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim3;
 
@@ -84,6 +73,7 @@ static void MX_DMA_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -125,11 +115,14 @@ int main(void)
   MX_TIM3_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+
+  ssd1306_Init();
   // Iniciamos la escucha por DMA. El programa no se detiene aquí.
   HAL_UART_Receive_DMA(&huart2, &rx_byte, 1);
 
-  // 2. ¡FALTABA ESTO! Calibrar e iniciar el ADC con DMA para el Joystick
+  // 2. Calibrar e iniciar el ADC con DMA para el Joystick
   HAL_ADCEx_Calibration_Start(&hadc1);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)joystick_data, 2);
   /* USER CODE END 2 */
@@ -138,14 +131,15 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  // Formatear el mensaje con los valores actuales del array DMA
-	      sprintf(msg_buffer, "X: %4d | Y: %4d\r\n", joystick_data[0], joystick_data[1]);
+      ssd1306_TestAll();
+      // Formatear el mensaje con los valores actuales del array DMA
+      // sprintf(msg_buffer, "X: %4d | Y: %4d\r\n", joystick_data[0], joystick_data[1]);
 
-	      // Enviar por UART (Bloqueante aqui está bien para debugging simple)
-	      HAL_UART_Transmit(&huart2, (uint8_t*)msg_buffer, strlen(msg_buffer), 100);
+      // Enviar por UART (Bloqueante aqui está bien para debugging simple)
+      // HAL_UART_Transmit(&huart2, (uint8_t*)msg_buffer, strlen(msg_buffer), 100);
 
-	      // Esperar un poco para no saturar la pantalla
-	      HAL_Delay(100);
+      // Esperar un poco para no saturar la pantalla
+      // HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -257,6 +251,54 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x0010061A;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
 
 }
 
@@ -385,6 +427,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
